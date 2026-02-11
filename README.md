@@ -5,7 +5,7 @@ The idea of this repository is to provide a set of tools that can be used for de
 
 This is a port of the commandline tool ```txt2bas``` created by [Remy Sharp](https://zx.remysharp.com/) -which can be found in [this repo](https://github.com/remy/txt2bas/) as a [Node.JS-based](https://nodejs.org/en/) tool, which in turn is inspired by the ```.txt2bas``` dot command available on the ZX Spectrum Next.
 
-The goal is not to replace such a great tool, but to provide a .NET alternative for basic ```+3DOS``` functionality that you can directly use and or integrate into your own projects, if needed. In this case, the provided functionality  converts plain text into tokenized (+3DOS basic) text that can be recognized by the ```Speccy Next```. So why is the tool so limited? Because I only need, right now, to get an autoexec.bas file like this ...
+The goal is not to replace such a great tool, but to provide a .NET alternative for basic ```+3DOS``` functionality that you can directly use, refactor partially or completely and or integrate into your own projects, if needed. In this case, the provided functionality  converts plain text into tokenized (+3DOS basic) text that can be recognized by the ```Speccy Next```. So why is the tool so limited? Because I only need, right now, to get an autoexec.bas file like this ...
 
 ![](https://github.com/Ultrahead/SpeccyNextTools/blob/main/blob/autoexec.png)
 
@@ -46,6 +46,7 @@ Thanks to:
 - The developers of the NextZXOS (for providing the original tool in the OS and make the assembly code public)
 - Juan Segura Duran, aka "Duefectu" (for maintaining ZX Basic Studio, and his patience to all my questions)
 - José Rodriguez, aka "Boriel" (for providing such a beatiful and useful language original baptized as Boriel Basic, and his infinite patience to my crazy requests for the language)
+- Gemini (for providing assistance where needed; a note here: you will notice that each app stems from a single-file implementation located in Program.cs, well, it was easier to obtain results with Gemini this way for my goals; feel free to refactor it)
 
 This is very important to keep in mind: <ins>the code comes as is with no support</ins>. So, in case you want to modify it to suit your needs, go ahead, grab the code and have fun experimenting with it!
 
