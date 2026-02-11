@@ -42,11 +42,11 @@ Again, if everything results ok, you will find the text file in the path you pro
 ## Final Words ...
 
 Thanks to:
-- Remy Sharp (for developing the Node.JS-based tool)
-- The developers of the NextZXOS (for providing the original tool in the OS and make the assembly code public)
-- Juan Segura Duran, aka "Duefectu" (for maintaining ZX Basic Studio, and his patience to all my questions)
-- José Rodriguez, aka "Boriel" (for providing such a beatiful and useful language original baptized as Boriel Basic, and his infinite patience to my crazy requests for the language)
-- Gemini (for providing assistance where needed; a note here: you will notice that each app stems from a single-file implementation located in Program.cs, well, it was easier to obtain results with Gemini this way for my goals; feel free to refactor it)
+- **Remy Sharp** (for developing that wonderful toolset for the Speccy Next, [ZX Tools](https://github.com/remy/zx-tools)!)
+- **The developers** of the NextZXOS (for providing the original tool in the OS and make the assembly [source code](https://gitlab.com/thesmog358/tbblue/-/blob/ef6dc4fd0f684349d16354d67d4f756db2994fdb/src/asm/dot_commands/txt2bas.asm) public)
+- **Juan Segura Duran**, aka "Duefectu" (for maintaining ZX Basic Studio, [DuefectuCorp](https://www.duefectucorp.com/), and his patience to all my questions)
+- **José Rodriguez**, aka "Boriel" (for providing such a beatiful and useful language original baptized as [Boriel Basic](https://github.com/boriel-basic), and his infinite patience to my crazy requests for the language)
+- **Gemini** (for providing assistance where needed; a note here: you will notice that each app stems from a single-file implementation located in Program.cs, well, it was easier to obtain results with Gemini this way for my goals; feel free to refactor it) [(^)](https://gemini.google.com/)
 
 This is very important to keep in mind: <ins>the code comes as is with no support</ins>. So, in case you want to modify it to suit your needs, go ahead, grab the code and have fun experimenting with it!
 
