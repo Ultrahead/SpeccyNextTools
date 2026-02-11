@@ -1,4 +1,4 @@
-﻿// File   Program.cs
+// File   Program.cs
 // Brief  Implementation file for the process that converts plain text into a +3DOS file.
 
 using System.Text;
@@ -251,12 +251,13 @@ namespace Txt2Bas
             // 1. Iterate through the text character by character.
             // 2. Detect and process String Literals (preserve exactly).
             // 3. Detect and process Numbers (convert to ASCII + 5-byte hidden Sinclair format).
-            // 4. Detect and process Keywords (Greedy Match against TokenMap):
+            // 4. Detect and process SPECIAL COMMENT (';' after colon or at start).
+            // 5. Detect and process Keywords (Greedy Match against TokenMap):
             //    a. If REM found, consume the rest of the line as a comment.
             //    b. If other keyword found, strip immediately following whitespace.
-            // 5. Fallback: Add character as literal ASCII.
-            // 6. Append End-of-Line marker (0x0D).
-            // 7. Prepend the Line Header (Line Number + Length) and return the byte array.
+            // 6. Fallback: Add character as literal ASCII.
+            // 7. Append End-of-Line marker (0x0D).
+            // 8. Prepend the Line Header (Line Number + Length) and return the byte array.
 
             List<byte> lineData = new List<byte>();
             
@@ -291,6 +292,29 @@ namespace Txt2Bas
                         lineData.Add(0x0E); // Hidden Marker
                         lineData.AddRange(SinclairNumber.Pack(val));
                         i = j - 1; 
+                        continue;
+                    }
+                }
+
+                // COMMENT HANDLING: Strict check for ';comment' idiom
+                // Trigger: Semicolon at start of line OR Semicolon immediately preceded by Colon
+                if (text[i] == ';')
+                {
+                    bool isComment = false;
+                    
+                    // Look backwards skipping whitespace to find the context
+                    int back = i - 1;
+                    while (back >= 0 && text[back] == ' ') back--;
+                    
+                    if (back < 0) isComment = true; // Start of line
+                    else if (text[back] == ':') isComment = true; // Preceded by colon
+
+                    if (isComment)
+                    {
+                        // Consume the rest of the line as literal text (do not tokenize)
+                        string comment = text.Substring(i);
+                        lineData.AddRange(Encoding.ASCII.GetBytes(comment));
+                        i = text.Length; 
                         continue;
                     }
                 }
