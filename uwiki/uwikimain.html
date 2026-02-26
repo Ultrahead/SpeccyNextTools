@@ -65,7 +65,7 @@
         .btn-pdf { background: #e74c3c; color: white; }
 
         /* LAYOUT */
-        #layout-body { display: flex; flex-grow: 1; overflow: hidden; }
+        #layout-body { display: flex; flex-grow: 1; overflow: hidden; position: relative; }
 
         /* SIDEBAR STYLES */
         #sidebar {
@@ -178,13 +178,44 @@
             color: var(--header-color);
         }
 
+        /* --- RESPONSIVE DESIGN FOR MOBILE --- */
+        .hamburger { display: none; background: transparent; color: var(--header-color); border: none; font-size: 1.8rem; cursor: pointer; padding: 0; margin-right: 5px; }
+        #mobile-overlay { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 1500; }
+        
+        @media (max-width: 850px) {
+            /* Header adjustments */
+            #global-header { flex-wrap: wrap; height: auto; padding: 15px; gap: 10px; }
+            .hamburger { display: block; }
+            #global-header h1 { flex-grow: 1; font-size: 1.1em; }
+            .search-area { width: 100%; order: 10; margin-top: 5px; }
+            .btn-ui { padding: 8px 10px; font-size: 0.8em; }
+            
+            /* Sidebar adjustments */
+            #sidebar { position: absolute; left: -300px; height: 100%; z-index: 2000; transition: left 0.3s ease; }
+            #sidebar.open { left: 0; box-shadow: 2px 0 15px rgba(0,0,0,0.8); }
+            #mobile-overlay.active { display: block; }
+            
+            /* Main View adjustments */
+            #main-view { padding: 15px; }
+            .func-card { padding: 15px; }
+            .welcome-screen { margin-top: 40px; }
+            
+            /* Table of contents responsive */
+            .toc-item-list { column-count: 1; }
+        }
+
+        @media (max-width: 500px) {
+            /* Extremely small screens: hide text on buttons to fit top row */
+            .btn-theme span, .btn-export span, .btn-pdf span { display: none; }
+        }
+
         /* PRINT MEDIA QUERIES */
         @media print {
             * {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
             }
-            #global-header, #sidebar, #btn-top { display: none !important; }
+            #global-header, #sidebar, #btn-top, .hamburger, #mobile-overlay { display: none !important; }
             
             html, body, #layout-body, #main-view { 
                 display: block !important; 
@@ -217,8 +248,9 @@
 <body>
 
 <header id="global-header" class="print-hidden">
+    <button class="hamburger" onclick="toggleSidebar()">☰</button>
     <h1 onclick="goHome()">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 5px;">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
             <polyline points="9 22 9 12 15 12 15 22"></polyline>
         </svg>
@@ -226,15 +258,16 @@
     </h1>
     <div class="search-area">
         <input type="text" id="searchBar" placeholder="Search by name..." onkeyup="nameSearch()">
-        <button class="btn-ui btn-clear" onclick="clearSearch()">✖ Clear</button>
-        <div id="found-count">Items Found: 0</div>
+        <button class="btn-ui btn-clear" onclick="clearSearch()">✖</button>
+        <div id="found-count">Found: 0</div>
     </div>
-    <button class="btn-ui btn-theme" onclick="toggleTheme()">🌓 Theme</button>
-    <button id="btn-offline" class="btn-ui btn-export" onclick="exportOffline()">💾 Offline</button>
-    <button id="pdf-master-btn" class="btn-ui btn-pdf" onclick="pdfLogic()">📄 Full Manual</button>
+    <button class="btn-ui btn-theme" onclick="toggleTheme()">🌓 <span>Theme</span></button>
+    <button id="btn-offline" class="btn-ui btn-export" onclick="exportOffline()">💾 <span>Offline</span></button>
+    <button id="pdf-master-btn" class="btn-ui btn-pdf" onclick="pdfLogic()">📄 <span>Manual</span></button>
 </header>
 
 <div id="layout-body">
+    <div id="mobile-overlay" onclick="toggleSidebar()"></div>
     <nav id="sidebar">
         <div class="menu-container" id="dynamic-menu">
             </div>
@@ -250,7 +283,7 @@
             <div class="welcome-screen">
                 <h2 style="color: var(--header-color)">Welcome to the</h2>
                 <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
-                <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                <p>Select a statement from the menu or use the search bar above to view documentation.</p>
                 <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
                     <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
                 </p>
@@ -268,7 +301,7 @@
     </main>
 </div>
 
-<button id="btn-top" onclick="scrollToTop()">▲ Top</button>
+<button id="btn-top" onclick="scrollToTop()">▲</button>
 
 <script id="offline-data-island" type="application/json">{}</script>
 
@@ -325,6 +358,11 @@
         localStorage.setItem('theme', newTheme);
     }
 
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+        document.getElementById('mobile-overlay').classList.toggle('active');
+    }
+
     function clearSearch() { 
         document.getElementById('searchBar').value = ''; 
         nameSearch(); 
@@ -347,13 +385,13 @@
 
         if (val.length > 0) {
             body.classList.add('is-searching');
-            pdfBtn.innerHTML = "📄 Print View";
+            pdfBtn.innerHTML = "📄 <span>Print View</span>";
         } else {
             body.classList.remove('is-searching');
             if (body.classList.contains('viewing-manual')) {
-                pdfBtn.innerHTML = "📄 Print View";
+                pdfBtn.innerHTML = "📄 <span>Print View</span>";
             } else {
-                pdfBtn.innerHTML = hasActiveDoc ? "📄 Print View" : "📄 Full Manual";
+                pdfBtn.innerHTML = hasActiveDoc ? "📄 <span>Print View</span>" : "📄 <span>Manual</span>";
             }
         }
 
@@ -365,7 +403,7 @@
             card.classList.toggle('search-hidden', !match);
             if(match) count++;
         }
-        countEl.innerText = "Items Found: " + count;
+        countEl.innerText = "Found: " + count;
     }
 
     // --- PATH RESOLVER FOR MARKDOWN LINKS ---
@@ -463,7 +501,7 @@
                 <div class="welcome-screen">
                     <h2 style="color: var(--header-color)">Welcome to the</h2>
                     <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
-                    <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                    <p>Select a statement from the menu or use the search bar above to view documentation.</p>
                     <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
                         <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
                     </p>
@@ -631,7 +669,7 @@
             }
 
             body.classList.add('viewing-manual');
-            pdfBtn.innerHTML = "📄 Print View";
+            pdfBtn.innerHTML = "📄 <span>Print View</span>";
             pdfBtn.disabled = false;
             
             manualArea.scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -868,6 +906,12 @@
             } else {
                 target.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+
+            // Mobile: close sidebar upon selection
+            if (window.innerWidth <= 850) {
+                document.getElementById('sidebar').classList.remove('open');
+                document.getElementById('mobile-overlay').classList.remove('active');
+            }
             
         } else if (!filePath) {
             document.body.classList.remove('viewing-manual');
@@ -876,7 +920,7 @@
                 <div class="welcome-screen">
                     <h2 style="color: var(--header-color)">Welcome to the</h2>
                     <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
-                    <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                    <p>Select a statement from the menu or use the search bar above to view documentation.</p>
                     <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
                         <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
                     </p>
@@ -888,7 +932,7 @@
                     </p>
                 </div>
             `;
-            document.getElementById('pdf-master-btn').innerHTML = "📄 Full Manual";
+            document.getElementById('pdf-master-btn').innerHTML = "📄 <span>Manual</span>";
         }
     }
 
