@@ -1,0 +1,1 @@
+Powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.\GenerateOffline.ps1'"

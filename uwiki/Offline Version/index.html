@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZX Basic Unofficial Wiki Portal</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <style>
+        /* THEMES */
+        [data-theme="dark"] { 
+            --bg: #1e1e1e; --side-bg: #252526; --card-bg: #2d2d2d; --text: #d4d4d4; 
+            --header-color: #569cd6; --border: #3e3e42; --accent: #e67e22; --hover: #37373d;
+        }
+        [data-theme="light"] { 
+            --bg: #ffffff; --side-bg: #f3f3f3; --card-bg: #ffffff; --text: #333333; 
+            --header-color: #2980b9; --border: #dddddd; --accent: #e67e22; --hover: #e0e0e0;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* HEADER STYLES */
+        #global-header {
+            height: 70px;
+            background: var(--side-bg);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 15px;
+            flex-shrink: 0;
+            z-index: 1000;
+        }
+
+        #global-header h1 { 
+            font-size: 1.1em; 
+            margin: 0; 
+            color: var(--header-color); 
+            white-space: nowrap; 
+            cursor: pointer; 
+            display: flex; 
+            align-items: center; 
+            gap: 8px; 
+        }
+
+        .search-area { flex-grow: 1; display: flex; align-items: center; gap: 12px; }
+        #searchBar { flex-grow: 1; padding: 10px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); outline: none; }
+        #found-count { font-size: 0.8em; font-weight: bold; color: var(--header-color); min-width: 130px; visibility: hidden; white-space: nowrap; }
+
+        .btn-ui { padding: 10px 14px; border-radius: 5px; border: none; cursor: pointer; font-weight: bold; font-size: 0.85em; white-space: nowrap; transition: 0.2s; }
+        .btn-clear { background: #7f8c8d; color: white; }
+        .btn-theme { background: #f1c40f; color: #333; }
+        .btn-export { background: #27ae60; color: white; }
+        .btn-pdf { background: #e74c3c; color: white; }
+
+        /* LAYOUT */
+        #layout-body { display: flex; flex-grow: 1; overflow: hidden; }
+
+        /* SIDEBAR STYLES */
+        #sidebar {
+            width: 300px;
+            background: var(--side-bg);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .menu-container { overflow-y: auto; flex-grow: 1; padding: 10px; }
+        .tree-category { cursor: pointer; font-weight: bold; padding: 8px; display: flex; align-items: center; color: var(--accent); user-select: none; }
+        .tree-category::before { content: '▼'; margin-right: 8px; font-size: 0.8rem; transition: transform 0.2s; }
+        .tree-category.collapsed::before { transform: rotate(-90deg); }
+        .tree-items { list-style: none; padding-left: 20px; margin: 0; }
+        .tree-items.hidden { display: none; }
+        .tree-item { padding: 6px 10px; margin: 2px 0; cursor: pointer; border-radius: 4px; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tree-item:hover { background: var(--hover); color: var(--text); }
+        .tree-item.active { background: var(--header-color); color: white; }
+
+        #sidebar-footer { padding: 15px; background: var(--side-bg); border-top: 1px solid var(--border); font-size: 0.75rem; color: #888; text-align: left; }
+        #last-update { color: var(--accent); font-weight: bold; margin-top: 4px; }
+
+        /* MAIN CONTENT STYLES */
+        #main-view { flex-grow: 1; overflow-y: auto; padding: 40px; display: flex; justify-content: center; align-items: flex-start; position: relative;}
+        #doc-container, #results-area, #print-manual-area { width: 100%; max-width: 900px; }
+        
+        .welcome-screen { text-align: center; margin-top: 100px; color: var(--text); }
+        
+        .func-card { background: var(--card-bg); border-left: 5px solid var(--accent); padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); animation: fadeIn 0.3s ease-out; }
+        .search-result-card { padding: 15px 25px; transition: transform 0.2s; }
+        .search-result-card:hover { transform: translateX(10px); }
+
+        .search-hidden { display: none !important; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* SCROLL TO TOP BUTTON */
+        #btn-top {
+            display: none; 
+            position: fixed; 
+            bottom: 30px; 
+            right: 40px; 
+            z-index: 99; 
+            border: none; 
+            outline: none; 
+            background-color: var(--accent); 
+            color: white; 
+            cursor: pointer; 
+            padding: 12px 18px; 
+            border-radius: 5px; 
+            font-size: 1em; 
+            font-weight: bold; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            transition: background-color 0.3s, transform 0.2s;
+        }
+        #btn-top:hover {
+            background-color: var(--header-color);
+            transform: translateY(-3px);
+        }
+
+        /* Markdown Overrides */
+        .func-card h1 { color: var(--header-color); margin-top: 0; }
+        .func-card h2.func-name { color: var(--header-color); margin: 0 0 5px 0; font-family: 'Consolas', monospace; }
+        .func-card pre { background: #1a1a1a; padding: 15px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+        .func-card code { font-family: 'Consolas', monospace; color: #4ec9b0; }
+        /* Hyperlink Overrides */
+        .func-card a { color: var(--header-color); text-decoration: none; border-bottom: 1px dotted var(--header-color); transition: color 0.2s, border-color 0.2s; }
+        .func-card a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* --- VIEW STATE MANAGEMENT --- */
+        #results-area, #print-manual-area { display: none; }
+        
+        body.is-searching #doc-container, body.is-searching #print-manual-area { display: none !important; }
+        body.is-searching #results-area { display: block !important; }
+        
+        body.viewing-manual:not(.is-searching) #doc-container, body.viewing-manual:not(.is-searching) #results-area { display: none !important; }
+        body.viewing-manual:not(.is-searching) #print-manual-area { display: block !important; }
+
+        /* CATEGORY-BASED TABLE OF CONTENTS */
+        .toc-category-block {
+            margin-bottom: 30px;
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .toc-item-list {
+            column-count: 3;
+            column-gap: 30px;
+            padding: 0;
+            margin: 0;
+            list-style-type: square;
+            list-style-position: inside;
+        }
+        .toc-item-list > li {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-bottom: 6px;
+            font-size: 0.95em;
+        }
+        
+        .toc-item-list a {
+            color: var(--accent);
+            text-decoration: none;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .toc-item-list a:hover {
+            text-decoration: underline;
+            color: var(--header-color);
+        }
+
+        /* PRINT MEDIA QUERIES */
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            #global-header, #sidebar, #btn-top { display: none !important; }
+            
+            html, body, #layout-body, #main-view { 
+                display: block !important; 
+                position: static !important;
+                height: auto !important; 
+                overflow: visible !important; 
+                width: 100% !important; 
+                max-width: none !important;
+                margin: 0 !important; 
+                padding: 0 !important; 
+                background-color: var(--bg) !important; 
+                color: var(--text) !important; 
+            }
+            
+            .func-card { background-color: var(--card-bg) !important; border: 1px solid var(--border) !important; box-shadow: none; break-inside: avoid; page-break-inside: avoid; }
+            
+            body.is-searching .search-result-card .stub-text { display: none !important; }
+            body.is-searching .search-result-card .func-name { display: none !important; } 
+            body.is-searching .search-result-card .full-content { display: block !important; }
+
+            .manual-category-title { page-break-before: always; color: var(--header-color); border-bottom: 2px solid var(--border); padding-bottom: 10px; margin-top: 0; }
+            .manual-toc { page-break-after: always; font-size: 1.1em; }
+            .manual-doc-entry { margin-bottom: 30px; }
+            
+            /* Clean up link borders for print */
+            .func-card a { border-bottom: none; color: var(--header-color) !important; }
+        }
+    </style>
+</head>
+<body>
+
+<header id="global-header" class="print-hidden">
+    <h1 onclick="goHome()">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        ZX Basic Wiki
+    </h1>
+    <div class="search-area">
+        <input type="text" id="searchBar" placeholder="Search by name..." onkeyup="nameSearch()">
+        <button class="btn-ui btn-clear" onclick="clearSearch()">✖ Clear</button>
+        <div id="found-count">Items Found: 0</div>
+    </div>
+    <button class="btn-ui btn-theme" onclick="toggleTheme()">🌓 Theme</button>
+    <button id="btn-offline" class="btn-ui btn-export" onclick="exportOffline()">💾 Offline</button>
+    <button id="pdf-master-btn" class="btn-ui btn-pdf" onclick="pdfLogic()">📄 Full Manual</button>
+</header>
+
+<div id="layout-body">
+    <nav id="sidebar">
+        <div class="menu-container" id="dynamic-menu">
+            </div>
+        <div id="sidebar-footer">
+            <p style="margin: 0;">Last Update:
+            <span id="last-update">Loading...</span>
+            </p>
+        </div>
+    </nav>
+
+    <main id="main-view">
+        <div id="doc-container">
+            <div class="welcome-screen">
+                <h2 style="color: var(--header-color)">Welcome to the</h2>
+                <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
+                <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
+                    <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
+                </p>
+                <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                    This <u>unofficial</u> wiki is based on <a href="https://github.com/boriel-basic/zxbasic/tree/main/docs" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic's markdown documents</a>.
+                </p>
+                <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                    The official documentation can be found <a href="https://zxbasic.readthedocs.io/" target="_blank" style="color: var(--accent); text-decoration: none;">here</a>.
+                </p>
+            </div>
+        </div>
+        
+        <div id="results-area"></div>
+        <div id="print-manual-area"></div>
+    </main>
+</div>
+
+<button id="btn-top" onclick="scrollToTop()">▲ Top</button>
+
+<script id="offline-data-island" type="application/json">{}</script>
+
+<script>
+    // Note: ?path=docs ensures it only triggers update dates when docs are modified, not the core compiler
+    const COMMIT_API_URL = "https://api.github.com/repos/boriel-basic/zxbasic/commits?path=docs&per_page=1";
+    
+    const docContainer = document.getElementById('doc-container');
+    const resultsArea = document.getElementById('results-area');
+    const mainView = document.getElementById('main-view');
+    const btnTop = document.getElementById('btn-top');
+    
+    const fileRegistry = {}; 
+    let cache = {}; 
+    let globalGroupedDocs = {};
+    let globalSortedCategories = [];
+    let globalRawTree = []; 
+
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark');
+
+    // --- INITIALIZE OFFLINE DATA ---
+    function initOfflineData() {
+        try {
+            const island = document.getElementById('offline-data-island');
+            if (island && island.textContent.trim().length > 10) {
+                const parsedData = JSON.parse(island.textContent);
+                window.OFFLINE_TREE = parsedData.tree;
+                cache = parsedData.cache; // Hydrate cache immediately
+                window.OFFLINE_DATE = parsedData.date || "Unknown Date"; // Hydrate the formatted date
+                console.log("Offline Vault Loaded Successfully.");
+            }
+        } catch(e) {
+            console.error("Failed to parse offline vault.", e);
+        }
+    }
+    initOfflineData();
+
+    mainView.onscroll = function() {
+        if (mainView.scrollTop > 300) {
+            btnTop.style.display = "block";
+        } else {
+            btnTop.style.display = "none";
+        }
+    };
+
+    function scrollToTop() {
+        mainView.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function toggleTheme() {
+        const html = document.documentElement;
+        const newTheme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+    }
+
+    function clearSearch() { 
+        document.getElementById('searchBar').value = ''; 
+        nameSearch(); 
+    }
+
+    function goHome() {
+        document.body.classList.remove('viewing-manual');
+        clearSearch(); 
+        window.location.hash = ''; 
+    }
+
+    function nameSearch() {
+        const val = document.getElementById('searchBar').value.toLowerCase();
+        const countEl = document.getElementById('found-count');
+        const pdfBtn = document.getElementById('pdf-master-btn');
+        const body = document.body;
+        
+        const hasActiveDoc = document.querySelector('.tree-item.active') !== null;
+        countEl.style.visibility = (val.length > 0) ? "visible" : "hidden";
+
+        if (val.length > 0) {
+            body.classList.add('is-searching');
+            pdfBtn.innerHTML = "📄 Print View";
+        } else {
+            body.classList.remove('is-searching');
+            if (body.classList.contains('viewing-manual')) {
+                pdfBtn.innerHTML = "📄 Print View";
+            } else {
+                pdfBtn.innerHTML = hasActiveDoc ? "📄 Print View" : "📄 Full Manual";
+            }
+        }
+
+        let count = 0;
+        const cards = resultsArea.getElementsByClassName('search-result-card');
+        for (let card of cards) {
+            const name = card.querySelector('.func-name').innerText.toLowerCase();
+            const match = name.includes(val);
+            card.classList.toggle('search-hidden', !match);
+            if(match) count++;
+        }
+        countEl.innerText = "Items Found: " + count;
+    }
+
+    // --- PATH RESOLVER FOR MARKDOWN LINKS ---
+    function resolvePath(basePath, relativePath) {
+        let hash = "";
+        const hashIdx = relativePath.indexOf('#');
+        if (hashIdx !== -1) {
+            hash = relativePath.substring(hashIdx);
+            relativePath = relativePath.substring(0, hashIdx);
+        }
+        if (!relativePath) return basePath + hash;
+
+        if (relativePath.startsWith('/')) {
+            return relativePath.substring(1) + hash;
+        }
+
+        const stack = basePath.split('/');
+        stack.pop(); 
+        const parts = relativePath.split('/');
+        
+        for (let p of parts) {
+            if (p === '.' || p === '') continue;
+            if (p === '..') {
+                if (stack.length > 0) stack.pop();
+            } else {
+                stack.push(p);
+            }
+        }
+        return stack.join('/') + hash;
+    }
+
+    function fixLinksAndImages(container, currentFilePath) {
+        // Fix Internal Markdown Links
+        const links = container.querySelectorAll('a');
+        links.forEach(link => {
+            let href = link.getAttribute('href');
+            if (!href) return;
+            
+            // Open external links in new tab
+            if (href.startsWith('http') || href.startsWith('mailto:')) {
+                link.setAttribute('target', '_blank');
+                return;
+            }
+
+            // Convert relative or internal anchor links to our SPA hash format
+            if (href.startsWith('#')) {
+                link.setAttribute('href', '#' + currentFilePath + href);
+            } else {
+                const resolved = resolvePath(currentFilePath, href);
+                link.setAttribute('href', '#' + resolved);
+            }
+        });
+
+        // Fix Internal Markdown Images so they display correctly
+        const imgs = container.querySelectorAll('img');
+        imgs.forEach(img => {
+            let src = img.getAttribute('src');
+            if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+                const resolved = resolvePath(currentFilePath, src);
+                img.setAttribute('src', 'https://raw.githubusercontent.com/boriel-basic/zxbasic/main/' + resolved);
+            }
+        });
+    }
+
+    async function exportOffline() {
+        const btn = document.getElementById('btn-offline');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = "⏳ Bundling...";
+        btn.disabled = true;
+
+        try {
+            let fetchPromises = [];
+            for (const item of globalRawTree) {
+                if (item.path.startsWith('docs/') && item.path.endsWith('.md')) {
+                    if (!cache[item.path]) {
+                        const url = `https://raw.githubusercontent.com/boriel-basic/zxbasic/main/${item.path}`;
+                        fetchPromises.push(
+                            fetch(url).then(res => res.text()).then(text => { cache[item.path] = text; })
+                        );
+                    }
+                }
+            }
+            await Promise.all(fetchPromises);
+
+            const clone = document.documentElement.cloneNode(true);
+            
+            // Clean dynamic states so the exported HTML opens on a fresh Welcome Screen
+            clone.querySelector('#dynamic-menu').innerHTML = '';
+            clone.querySelector('#results-area').innerHTML = '';
+            clone.querySelector('#print-manual-area').innerHTML = '';
+            clone.querySelector('#print-manual-area').removeAttribute('data-built');
+            clone.querySelector('body').className = '';
+            
+            clone.querySelector('#doc-container').innerHTML = `
+                <div class="welcome-screen">
+                    <h2 style="color: var(--header-color)">Welcome to the</h2>
+                    <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
+                    <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                    <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
+                        <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
+                    </p>
+                    <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                        This <u>unofficial</u> wiki is based on <a href="https://github.com/boriel-basic/zxbasic/tree/main/docs" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic's markdown documents</a>.
+                    </p>
+                    <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                        The official documentation can be found <a href="https://zxbasic.readthedocs.io/" target="_blank" style="color: var(--accent); text-decoration: none;">here</a>.
+                    </p>
+                </div>
+            `;
+            
+            const exportBtn = clone.querySelector('#btn-offline');
+            if(exportBtn) exportBtn.remove();
+            
+            // Extract the current date displayed (without the 'Online' string) so we can bake it in
+            let bakedDate = document.getElementById('last-update').innerText.replace(' (Online)', '');
+
+            // Build the JSON payload and secure it against breaking out of the island
+            const payload = { tree: globalRawTree, cache: cache, date: bakedDate };
+            const safeJson = JSON.stringify(payload).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+            
+            // Inject into the secure island
+            const island = clone.querySelector('#offline-data-island');
+            if (island) {
+                island.textContent = safeJson;
+            }
+
+            const htmlContent = clone.outerHTML;
+            const blob = new Blob(["<!DOCTYPE html>\n" + htmlContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'ZXBasic_Offline_Manual.html';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+        } catch (err) {
+            console.error("Export failed:", err);
+            alert("Export failed. See console for details.");
+        }
+
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+
+    async function pdfLogic() {
+        const pdfBtn = document.getElementById('pdf-master-btn');
+        const body = document.body;
+
+        if (body.classList.contains('is-searching')) {
+            const originalText = pdfBtn.innerHTML;
+            pdfBtn.innerHTML = "⏳ Loading Docs...";
+            pdfBtn.disabled = true;
+
+            const visibleCards = resultsArea.querySelectorAll('.search-result-card:not(.search-hidden)');
+            
+            let fetchPromises = [];
+            for (let card of visibleCards) {
+                if (!card.hasAttribute('data-loaded')) {
+                    const filePath = card.getAttribute('data-filepath');
+                    const fileUrl = card.getAttribute('data-url');
+                    if (!cache[filePath]) {
+                        fetchPromises.push(
+                            fetch(fileUrl).then(res => res.text()).then(text => { cache[filePath] = text; })
+                        );
+                    }
+                }
+            }
+            await Promise.all(fetchPromises);
+
+            for (let card of visibleCards) {
+                if (!card.hasAttribute('data-loaded')) {
+                    const filePath = card.getAttribute('data-filepath');
+                    const contentDiv = card.querySelector('.full-content');
+                    contentDiv.innerHTML = marked.parse(cache[filePath] || "");
+                    
+                    // Route Links in Search Results
+                    fixLinksAndImages(contentDiv, filePath);
+                    
+                    contentDiv.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
+                    card.setAttribute('data-loaded', 'true');
+                }
+            }
+
+            setTimeout(() => {
+                pdfBtn.innerHTML = originalText;
+                pdfBtn.disabled = false;
+                window.print();
+            }, 500);
+
+        } else if (body.classList.contains('viewing-manual')) {
+            window.print();
+            
+        } else if (document.querySelector('.tree-item.active') !== null) {
+            window.print();
+            
+        } else {
+            pdfBtn.innerHTML = "⏳ Compiling Manual...";
+            pdfBtn.disabled = true;
+            
+            const manualArea = document.getElementById('print-manual-area');
+            
+            if (!manualArea.hasAttribute('data-built')) {
+                let tocHTML = `<div class="manual-toc">
+                                 <h1 style="color: var(--header-color); text-align: center; font-size: 2.5em; margin-bottom: 10px;">ZX Basic Reference Manual</h1>
+                                 <h2 style="text-align: center; margin-bottom: 40px;">Table of Contents</h2>`;
+                let bodyHTML = ``;
+                
+                let fetchPromises = [];
+                for (const catId of globalSortedCategories) {
+                    for (const fileObj of globalGroupedDocs[catId].files) {
+                        if (!cache[fileObj.path]) {
+                            fetchPromises.push(
+                                fetch(fileObj.download_url)
+                                .then(res => res.text())
+                                .then(text => { cache[fileObj.path] = text; })
+                            );
+                        }
+                    }
+                }
+                await Promise.all(fetchPromises); 
+
+                for (const catId of globalSortedCategories) {
+                    const category = globalGroupedDocs[catId];
+                    
+                    tocHTML += `
+                        <div class="toc-category-block">
+                            <h3 style="color: var(--header-color); border-bottom: 1px solid var(--border); padding-bottom: 5px; margin-top: 0; margin-bottom: 15px;">${category.name}</h3>
+                            <ul class="toc-item-list">`;
+                            
+                    bodyHTML += `<h1 class="manual-category-title">${category.name}</h1>`;
+                    
+                    for (const fileObj of category.files) {
+                        const safeId = "manual-doc-" + fileObj.path.replace(/[^a-zA-Z0-9-]/g, '-');
+                        
+                        tocHTML += `<li><a onclick="document.getElementById('${safeId}').scrollIntoView({behavior: 'smooth'})">${fileObj.displayName}</a></li>`;
+                        
+                        const mdText = cache[fileObj.path] || "*Error loading content*";
+                        const htmlContent = marked.parse(mdText);
+                        
+                        bodyHTML += `
+                            <div class="func-card manual-doc-entry" id="${safeId}" data-filepath="${fileObj.path}">
+                                <h2 class="func-name">${fileObj.displayName}</h2>
+                                ${htmlContent}
+                            </div>
+                        `;
+                    }
+                    tocHTML += `</ul></div>`;
+                }
+                tocHTML += `</div>`;
+                
+                manualArea.innerHTML = tocHTML + bodyHTML;
+                
+                // Route Links in Printed PDF Engine
+                manualArea.querySelectorAll('.manual-doc-entry').forEach(entry => {
+                    const path = entry.getAttribute('data-filepath');
+                    fixLinksAndImages(entry, path);
+                });
+
+                manualArea.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
+                manualArea.setAttribute('data-built', 'true');
+            }
+
+            body.classList.add('viewing-manual');
+            pdfBtn.innerHTML = "📄 Print View";
+            pdfBtn.disabled = false;
+            
+            manualArea.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }
+    }
+
+    async function fetchLastUpdate() {
+        if (window.OFFLINE_TREE) return; 
+
+        try {
+            const response = await fetch(COMMIT_API_URL);
+            const commits = await response.json();
+            if (commits && commits.length > 0) {
+                const lastDate = new Date(commits[0].commit.committer.date);
+                const options = { year: 'numeric', month: 'short', day: 'numeric' };
+                document.getElementById('last-update').innerText = lastDate.toLocaleDateString('en-US', options) + " (Online)";
+            }
+        } catch (error) {
+            console.error("Failed to fetch commit date", error);
+            document.getElementById('last-update').innerText = "Check GitHub";
+        }
+    }
+
+    async function loadMenu() {
+        try {
+            let data;
+            
+            if (window.OFFLINE_TREE) {
+                data = { tree: window.OFFLINE_TREE };
+                const displayDate = window.OFFLINE_DATE || "Unknown Date";
+                document.getElementById('last-update').innerText = displayDate + " (Offline)";
+            } else {
+                const TREES_API_URL = "https://api.github.com/repos/boriel-basic/zxbasic/git/trees/main?recursive=1";
+                const response = await fetch(TREES_API_URL);
+                data = await response.json();
+            }
+            
+            globalRawTree = data.tree; 
+            
+            const menuContainer = document.getElementById('dynamic-menu');
+            const mdFiles = data.tree.filter(item => item.path.startsWith('docs/') && item.type === 'blob' && item.path.endsWith('.md'));
+            const groupedDocs = {};
+
+            mdFiles.forEach(item => {
+                const parts = item.path.split('/');
+                let categoryId = "basic";
+                let categoryName = "Basic Statements";
+                let displayName = "";
+
+                if (parts.length === 2) {
+                    displayName = parts[1].replace('.md', '');
+                } else if (parts.length > 2) {
+                    categoryId = parts[1];
+                    
+                    if (categoryId === "library") {
+                        categoryName = "Basic Libraries";
+                    } else if (categoryId === "asm") {
+                        categoryName = "Embedding Assembly";
+                    } else if (categoryId === "architectures") {
+                        categoryName = "Architectures";
+                    } else if (categoryId === "released_programs") {
+                        categoryName = "Released Programs";
+                    } else {
+                        categoryName = categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
+                    }
+                    
+                    displayName = parts.slice(2).join(' / ').replace('.md', '');
+                }
+
+                if (!groupedDocs[categoryId]) {
+                    groupedDocs[categoryId] = { name: categoryName, files: [] };
+                }
+
+                groupedDocs[categoryId].files.push({
+                    path: item.path,
+                    name: parts[parts.length - 1],
+                    displayName: displayName,
+                    download_url: `https://raw.githubusercontent.com/boriel-basic/zxbasic/main/${item.path}`
+                });
+            });
+
+            const orderMap = { "basic": 1, "library": 2, "asm": 3 };
+
+            const sortedCategories = Object.keys(groupedDocs).sort((a, b) => {
+                // Force "architectures" to be absolute last
+                if (a === "architectures" && b !== "architectures") return 1;
+                if (b === "architectures" && a !== "architectures") return -1;
+                
+                // Force "released_programs" to be second-to-last
+                if (a === "released_programs" && b !== "released_programs") return 1;
+                if (b === "released_programs" && a !== "released_programs") return -1;
+
+                const orderA = orderMap[a] || 999;
+                const orderB = orderMap[b] || 999;
+
+                if (orderA !== orderB) return orderA - orderB;
+                return a.localeCompare(b);
+            });
+
+            globalGroupedDocs = groupedDocs;
+            globalSortedCategories = sortedCategories;
+
+            sortedCategories.forEach(catId => {
+                const category = groupedDocs[catId];
+
+                const catHeader = document.createElement('div');
+                catHeader.className = 'tree-category collapsed';
+                catHeader.innerText = category.name;
+                catHeader.onclick = () => toggleCategory(catHeader);
+                menuContainer.appendChild(catHeader);
+
+                const catList = document.createElement('ul');
+                catList.className = 'tree-items hidden';
+                menuContainer.appendChild(catList);
+
+                category.files.forEach(fileObj => {
+                    const li = document.createElement('li');
+                    li.className = 'tree-item';
+                    li.innerText = fileObj.displayName;
+                    
+                    fileRegistry[fileObj.path] = { fileObj, element: li, catHeader, catList };
+
+                    li.onclick = () => { window.location.hash = fileObj.path; };
+                    catList.appendChild(li);
+
+                    const searchCard = document.createElement('div');
+                    searchCard.className = 'func-card search-result-card';
+                    searchCard.setAttribute('data-filepath', fileObj.path); 
+                    searchCard.setAttribute('data-url', fileObj.download_url);
+                    
+                    searchCard.innerHTML = `
+                        <div class="card-header" style="cursor: pointer;">
+                            <h2 class="func-name">${fileObj.displayName}</h2>
+                            <div class="stub-text" style="font-size: 0.85em; margin: 0; color: #888; display: flex; justify-content: space-between;">
+                                <span>Category: <strong>${category.name}</strong></span>
+                                <span style="font-size: 0.75em;">&lt;click to load full document&gt;</span>
+                            </div>
+                        </div>
+                        <div class="full-content" style="display: none; margin-top: 25px;"></div>
+                    `;
+                    
+                    searchCard.querySelector('.card-header').onclick = () => {
+                        clearSearch(); 
+                        window.location.hash = fileObj.path;
+                    };
+                    resultsArea.appendChild(searchCard);
+                });
+            });
+
+            handleHashNavigation();
+
+        } catch (error) {
+            console.error("Menu load failed", error);
+        }
+    }
+
+    async function selectDoc(file, element) {
+        document.body.classList.remove('viewing-manual');
+        document.querySelectorAll('.tree-item').forEach(i => i.classList.remove('active'));
+        if(element) element.classList.add('active');
+
+        document.getElementById('searchBar').value = '';
+        nameSearch(); 
+
+        docContainer.innerHTML = '<div class="welcome-screen">Loading ' + file.name + '...</div>';
+
+        try {
+            let mdText;
+            if (cache[file.path]) {
+                mdText = cache[file.path];
+            } else {
+                const response = await fetch(file.download_url);
+                mdText = await response.text();
+                cache[file.path] = mdText;
+            }
+
+            renderDoc(mdText, file.path);
+        } catch (error) {
+            docContainer.innerHTML = `<div class="welcome-screen">Error loading content.</div>`;
+        }
+    }
+
+    function renderDoc(mdText, filePath) {
+        const htmlContent = marked.parse(mdText);
+        docContainer.innerHTML = `
+            <div class="func-card">
+                ${htmlContent}
+            </div>
+        `;
+        
+        // Route Links in Live Document View
+        fixLinksAndImages(docContainer, filePath);
+        
+        docContainer.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
+    }
+
+    function toggleCategory(el) {
+        el.classList.toggle('collapsed');
+        const list = el.nextElementSibling;
+        list.classList.toggle('hidden');
+    }
+
+    async function handleHashNavigation() {
+        let fullHash = window.location.hash.substring(1); 
+        let filePath = fullHash;
+        let subHash = "";
+        
+        // Split sub-hashes (e.g., jumping to a specific header inside a document)
+        const hashIdx = fullHash.indexOf('#');
+        if (hashIdx !== -1) {
+            filePath = fullHash.substring(0, hashIdx);
+            subHash = fullHash.substring(hashIdx + 1);
+        }
+
+        if (filePath && fileRegistry[filePath]) {
+            const target = fileRegistry[filePath];
+            
+            if(target.catHeader.classList.contains('collapsed')) {
+                target.catHeader.classList.remove('collapsed');
+                target.catList.classList.remove('hidden');
+            }
+            
+            // Check if we need to load a new doc, or just scroll to a sub-hash on the current doc
+            const isAlreadyLoaded = (document.querySelector('.tree-item.active') === target.element);
+            
+            if (!isAlreadyLoaded) {
+                await selectDoc(target.fileObj, target.element);
+            }
+            
+            // Handle scrolling
+            if (subHash) {
+                const el = document.getElementById(subHash);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                target.element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+        } else if (!filePath) {
+            document.body.classList.remove('viewing-manual');
+            document.querySelectorAll('.tree-item').forEach(i => i.classList.remove('active'));
+            docContainer.innerHTML = `
+                <div class="welcome-screen">
+                    <h2 style="color: var(--header-color)">Welcome to the</h2>
+                    <h1 style="color: var(--header-color)">ZX Basic Unofficial Wiki</h1>
+                    <p>Select a statement from the left menu or use the search bar above to view documentation.</p>
+                    <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
+                        <a href="https://boriel.com/" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic</a> (also known as Boriel Basic) was created by Jose Rodriguez-Rosa, who is also known by the nickname "Boriel".
+                    </p>
+                    <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                        This <u>unofficial</u> wiki is based on <a href="https://github.com/boriel-basic/zxbasic/tree/main/docs" target="_blank" style="color: var(--accent); text-decoration: none;">ZX Basic's markdown documents</a>.
+                    </p>
+                    <p style="margin-top: 10px; font-size: 0.9em; color: #888;">
+                        The official documentation can be found <a href="https://zxbasic.readthedocs.io/" target="_blank" style="color: var(--accent); text-decoration: none;">here</a>.
+                    </p>
+                </div>
+            `;
+            document.getElementById('pdf-master-btn').innerHTML = "📄 Full Manual";
+        }
+    }
+
+    window.addEventListener('hashchange', handleHashNavigation);
+
+    loadMenu();
+    fetchLastUpdate();
+</script>
+
+</body>
+</html>
