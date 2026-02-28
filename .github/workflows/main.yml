@@ -1,0 +1,77 @@
+name: Build ZX Spectrum Tools
+
+# This tells GitHub to run the build every time you push code to the 'main' branch
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ==============================================================
+  # JOB 1: Build for Windows x64, macOS, and Linux x86_64
+  # ==============================================================
+  build-native:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build Executables
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: zx-tools-${{ matrix.os }}
+        path: |
+          ${{github.workspace}}/build/txt2bas*
+          ${{github.workspace}}/build/bas2txt*
+
+  # ==============================================================
+  # JOB 2: Build for Linux ARM64 (Using Debian 11 Container)
+  # ==============================================================
+  build-linux-arm64:
+    name: Build on Linux ARM64 (Debian 11)
+    runs-on: ubuntu-latest
+    
+    # This magic line tells GitHub to run everything below inside a pure Debian 11 environment!
+    container:
+      image: debian:11
+
+    steps:
+    # Because it's a barebones Debian image, we need to install Git, CMake, and the compiler first!
+    - name: Install Build Tools & ARM64 Toolchain
+      run: |
+        apt-get update
+        apt-get install -y git cmake make gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+
+    - name: Configure CMake for ARM64
+      run: >
+        cmake -B ${{github.workspace}}/build 
+        -DCMAKE_BUILD_TYPE=Release 
+        -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ 
+        -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
+
+    - name: Build Executables
+      run: cmake --build ${{github.workspace}}/build --config Release
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: zx-tools-linux-arm64
+        path: |
+          ${{github.workspace}}/build/txt2bas
+          ${{github.workspace}}/build/bas2txt
