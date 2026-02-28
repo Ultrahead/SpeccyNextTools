@@ -23,19 +23,27 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    - name: Configure CMake
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
+    # --- Build txt2bas ---
+    - name: Configure CMake (txt2bas)
+      run: cmake -S ${{github.workspace}}/cpp/txt2bas -B ${{github.workspace}}/build/txt2bas -DCMAKE_BUILD_TYPE=Release
 
-    - name: Build Executables
-      run: cmake --build ${{github.workspace}}/build --config Release
+    - name: Build txt2bas
+      run: cmake --build ${{github.workspace}}/build/txt2bas --config Release
+
+    # --- Build bas2txt ---
+    - name: Configure CMake (bas2txt)
+      run: cmake -S ${{github.workspace}}/cpp/bas2txt -B ${{github.workspace}}/build/bas2txt -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build bas2txt
+      run: cmake --build ${{github.workspace}}/build/bas2txt --config Release
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zx-tools-${{ matrix.os }}
         path: |
-          ${{github.workspace}}/build/txt2bas*
-          ${{github.workspace}}/build/bas2txt*
+          ${{github.workspace}}/build/txt2bas/txt2bas*
+          ${{github.workspace}}/build/bas2txt/bas2txt*
 
   # ==============================================================
   # JOB 2: Build for Linux ARM64 (Using Debian 11 Container)
@@ -58,20 +66,32 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    - name: Configure CMake for ARM64
+    # --- Build txt2bas (ARM64) ---
+    - name: Configure CMake for ARM64 (txt2bas)
       run: >
-        cmake -B ${{github.workspace}}/build 
+        cmake -S ${{github.workspace}}/cpp/txt2bas -B ${{github.workspace}}/build/txt2bas 
         -DCMAKE_BUILD_TYPE=Release 
         -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ 
         -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
 
-    - name: Build Executables
-      run: cmake --build ${{github.workspace}}/build --config Release
+    - name: Build txt2bas
+      run: cmake --build ${{github.workspace}}/build/txt2bas --config Release
+
+    # --- Build bas2txt (ARM64) ---
+    - name: Configure CMake for ARM64 (bas2txt)
+      run: >
+        cmake -S ${{github.workspace}}/cpp/bas2txt -B ${{github.workspace}}/build/bas2txt 
+        -DCMAKE_BUILD_TYPE=Release 
+        -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ 
+        -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
+
+    - name: Build bas2txt
+      run: cmake --build ${{github.workspace}}/build/bas2txt --config Release
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zx-tools-linux-arm64
         path: |
-          ${{github.workspace}}/build/txt2bas
-          ${{github.workspace}}/build/bas2txt
+          ${{github.workspace}}/build/txt2bas/txt2bas
+          ${{github.workspace}}/build/bas2txt/bas2txt
