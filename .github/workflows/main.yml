@@ -1,4 +1,4 @@
-name: Build ZX Spectrum Tools
+name: Build Native ZX Spectrum Tools
 
 # This tells GitHub to run the build every time you push code to the 'main' branch
 on:
