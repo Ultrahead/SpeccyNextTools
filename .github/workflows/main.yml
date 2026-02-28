@@ -36,17 +36,25 @@ jobs:
     - name: Build bas2txt
       run: cmake --build ./build/bas2txt --config Release
 
-    # Fixed: Updated paths to capture Windows .exe in Release subfolders
-    # and Linux/macOS binaries in the root build folders.
+    # Organize binaries into a staging area to control the ZIP structure
+    - name: Stage Binaries
+      shell: bash
+      run: |
+        mkdir -p staging/txt2bas staging/bas2txt
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          # Check Release folder (MSVC) or root build folder (MinGW)
+          cp build/txt2bas/Release/txt2bas.exe staging/txt2bas/ 2>/dev/null || cp build/txt2bas/txt2bas.exe staging/txt2bas/
+          cp build/bas2txt/Release/bas2txt.exe staging/bas2txt/ 2>/dev/null || cp build/bas2txt/bas2txt.exe staging/bas2txt/
+        else
+          cp build/txt2bas/txt2bas staging/txt2bas/
+          cp build/bas2txt/bas2txt staging/bas2txt/
+        fi
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zx-tools-${{ matrix.os }}
-        path: |
-          ./build/txt2bas/Release/txt2bas.exe
-          ./build/txt2bas/txt2bas
-          ./build/bas2txt/Release/bas2txt.exe
-          ./build/bas2txt/bas2txt
+        path: staging/
 
   # ==============================================================
   # JOB 2: Build for Linux ARM64 (Using Debian 11 Container)
@@ -67,7 +75,7 @@ jobs:
     - name: Checkout Source Code
       uses: actions/checkout@v4
 
-    # Using $GITHUB_WORKSPACE ensures the path is correctly resolved inside the container
+    # Build txt2bas (ARM64)
     - name: Configure CMake for ARM64 (txt2bas)
       run: >
         cmake -S $GITHUB_WORKSPACE/cpp/txt2bas -B $GITHUB_WORKSPACE/build/txt2bas 
@@ -78,6 +86,7 @@ jobs:
     - name: Build txt2bas
       run: cmake --build $GITHUB_WORKSPACE/build/txt2bas --config Release
 
+    # Build bas2txt (ARM64)
     - name: Configure CMake for ARM64 (bas2txt)
       run: >
         cmake -S $GITHUB_WORKSPACE/cpp/bas2txt -B $GITHUB_WORKSPACE/build/bas2txt 
@@ -88,10 +97,15 @@ jobs:
     - name: Build bas2txt
       run: cmake --build $GITHUB_WORKSPACE/build/bas2txt --config Release
 
+    # Organize binaries for ARM64
+    - name: Stage Binaries
+      run: |
+        mkdir -p staging/txt2bas staging/bas2txt
+        cp $GITHUB_WORKSPACE/build/txt2bas/txt2bas staging/txt2bas/
+        cp $GITHUB_WORKSPACE/build/bas2txt/bas2txt staging/bas2txt/
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zx-tools-linux-arm64
-        path: |
-          ./build/txt2bas/txt2bas
-          ./build/bas2txt/bas2txt
+        path: staging/
