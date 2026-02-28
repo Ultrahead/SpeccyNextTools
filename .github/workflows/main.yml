@@ -36,13 +36,17 @@ jobs:
     - name: Build bas2txt
       run: cmake --build ./build/bas2txt --config Release
 
+    # Fixed: Updated paths to capture Windows .exe in Release subfolders
+    # and Linux/macOS binaries in the root build folders.
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: zx-tools-${{ matrix.os }}
         path: |
-          ./build/txt2bas/txt2bas*
-          ./build/bas2txt/bas2txt*
+          ./build/txt2bas/Release/txt2bas.exe
+          ./build/txt2bas/txt2bas
+          ./build/bas2txt/Release/bas2txt.exe
+          ./build/bas2txt/bas2txt
 
   # ==============================================================
   # JOB 2: Build for Linux ARM64 (Using Debian 11 Container)
