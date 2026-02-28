@@ -218,7 +218,7 @@ namespace bas2txt {
 
         return sb.str();
     }
-} // namespace Bas2Txt
+} // namespace bas2txt
 
 
 // --- Main Entry Point ---

@@ -390,7 +390,7 @@ namespace txt2bas {
 
         return finalLine;
     }
-} // namespace Txt2Bas
+} // namespace txt2bas
 
 // --- Main Entry Point ---
 int main(int argc, char *argv[]) {
@@ -410,9 +410,9 @@ int main(int argc, char *argv[]) {
     infile.close();
 
     try {
-        Txt2Bas::BasConverter converter;
+        txt2bas::BasConverter converter;
         std::vector<uint8_t> basData = converter.ConvertFile(inputFile);
-        std::vector<uint8_t> header = Txt2Bas::Plus3Dos::CreateHeader(basData.size(), converter.AutoStartLine);
+        std::vector<uint8_t> header = txt2bas::Plus3Dos::CreateHeader(basData.size(), converter.AutoStartLine);
 
         std::ofstream out(outputFile, std::ios::binary);
         if (!out.is_open()) {
