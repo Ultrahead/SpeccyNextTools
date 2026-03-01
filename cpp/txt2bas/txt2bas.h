@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 namespace txt2bas {
+
     class Plus3Dos {
     public:
         static std::vector<uint8_t> CreateHeader(int basicLength, int autoStartLine);
@@ -20,7 +21,6 @@ namespace txt2bas {
     class TokenMap {
     public:
         std::unordered_map<std::string, uint8_t> Map;
-
         TokenMap();
     };
 
@@ -29,15 +29,15 @@ namespace txt2bas {
         TokenMap _tokenMap;
         std::vector<std::string> _sortedKeys;
 
-        std::vector<uint8_t> ParseLine(int lineNum, const std::string &text);
+        std::vector<uint8_t> ParseLine(int lineNum, const std::string& text);
 
     public:
         int AutoStartLine = 32768;
 
         BasConverter();
-
-        std::vector<uint8_t> ConvertFile(const std::string &path);
+        std::vector<uint8_t> ConvertFile(const std::string& path);
     };
-} // namespace Txt2Bas
+
+} // namespace txt2bas
 
 #endif // TXT2BAS_H
