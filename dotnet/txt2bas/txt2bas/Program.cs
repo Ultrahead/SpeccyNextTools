@@ -1,17 +1,13 @@
 // File   Program_txt2bas.cs
 // Brief  Implementation file for the process that converts plain text into a +3DOS file.
 
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Txt2Bas
 {
-    public class Plus3Dos
+    internal static class Plus3Dos
     {
         public static byte[] CreateHeader(int basicLength, int autoStartLine)
         {
@@ -34,7 +30,7 @@ namespace Txt2Bas
             header[16] = (byte)(basicLength & 0xFF);
             header[17] = (byte)((basicLength >> 8) & 0xFF);
 
-            if (autoStartLine >= 0 && autoStartLine < 32768)
+            if (autoStartLine is >= 0 and < 32768)
             {
                 header[18] = (byte)(autoStartLine & 0xFF);
                 header[19] = (byte)((autoStartLine >> 8) & 0xFF);
@@ -59,65 +55,155 @@ namespace Txt2Bas
         }
     }
 
-    public class SinclairNumber
+    internal abstract class SinclairNumber
     {
         public static byte[] Pack(double number)
         {
-            if (number % 1 == 0 && number >= -65535.0 && number <= 65535.0)
+            if (number % 1 == 0 && number is >= -65535.0 and <= 65535.0)
             {
                 int val = (int)number;
                 byte sign = val < 0 ? (byte)0xFF : (byte)0x00;
                 if (val < 0) val = -val;
 
-                return new byte[] { 0x00, sign, (byte)(val & 0xFF), (byte)((val >> 8) & 0xFF), 0x00 };
+                return [0x00, sign, (byte)(val & 0xFF), (byte)((val >> 8) & 0xFF), 0x00];
             }
-            return new byte[] { 0, 0, 0, 0, 0 };
+            return "\0\0\0\0\0"u8.ToArray();
         }
     }
 
-    public class TokenMap
+    internal class TokenMap
     {
-        public Dictionary<string, byte> Map { get; private set; }
-
-        public TokenMap()
+        public Dictionary<string, byte> Map { get; private set; } = new(StringComparer.OrdinalIgnoreCase)
         {
-            Map = new Dictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
-
             // ZX Spectrum Next Extensions
-            Map["PEEK$"] = 0x87; Map["REG"] = 0x88; Map["DPOKE"] = 0x89; Map["DPEEK"] = 0x8A;
-            Map["MOD"] = 0x8B; Map["<<"] = 0x8C; Map[">>"] = 0x8D; Map["UNTIL"] = 0x8E;
-            Map["ERROR"] = 0x8F; Map["ON"] = 0x90; Map["DEFPROC"] = 0x91; Map["ENDPROC"] = 0x92;
-            Map["PROC"] = 0x93; Map["LOCAL"] = 0x94; Map["DRIVER"] = 0x95; Map["WHILE"] = 0x96;
-            Map["REPEAT"] = 0x97; Map["ELSE"] = 0x98; Map["REMOUNT"] = 0x99; Map["BANK"] = 0x9A;
-            Map["TILE"] = 0x9B; Map["LAYER"] = 0x9C; Map["PALETTE"] = 0x9D; Map["SPRITE"] = 0x9E;
-            Map["PWD"] = 0x9F; Map["CD"] = 0xA0; Map["MKDIR"] = 0xA1; Map["RMDIR"] = 0xA2;
-
+            ["PEEK$"] = 0x87,
+            ["REG"] = 0x88,
+            ["DPOKE"] = 0x89,
+            ["DPEEK"] = 0x8A,
+            ["MOD"] = 0x8B,
+            ["<<"] = 0x8C,
+            [">>"] = 0x8D,
+            ["UNTIL"] = 0x8E,
+            ["ERROR"] = 0x8F,
+            ["ON"] = 0x90,
+            ["DEFPROC"] = 0x91,
+            ["ENDPROC"] = 0x92,
+            ["PROC"] = 0x93,
+            ["LOCAL"] = 0x94,
+            ["DRIVER"] = 0x95,
+            ["WHILE"] = 0x96,
+            ["REPEAT"] = 0x97,
+            ["ELSE"] = 0x98,
+            ["REMOUNT"] = 0x99,
+            ["BANK"] = 0x9A,
+            ["TILE"] = 0x9B,
+            ["LAYER"] = 0x9C,
+            ["PALETTE"] = 0x9D,
+            ["SPRITE"] = 0x9E,
+            ["PWD"] = 0x9F,
+            ["CD"] = 0xA0,
+            ["MKDIR"] = 0xA1,
+            ["RMDIR"] = 0xA2,
             // Standard Sinclair BASIC
-            Map["SPECTRUM"] = 0xA3; Map["PLAY"] = 0xA4; Map["RND"] = 0xA5; Map["INKEY$"] = 0xA6;
-            Map["PI"] = 0xA7; Map["FN"] = 0xA8; Map["POINT"] = 0xA9; Map["SCREEN$"] = 0xAA;
-            Map["ATTR"] = 0xAB; Map["AT"] = 0xAC; Map["TAB"] = 0xAD; Map["VAL$"] = 0xAE;
-            Map["CODE"] = 0xAF; Map["VAL"] = 0xB0; Map["LEN"] = 0xB1; Map["SIN"] = 0xB2;
-            Map["COS"] = 0xB3; Map["TAN"] = 0xB4; Map["ASN"] = 0xB5; Map["ACS"] = 0xB6;
-            Map["ATN"] = 0xB7; Map["LN"] = 0xB8; Map["EXP"] = 0xB9; Map["INT"] = 0xBA;
-            Map["SQR"] = 0xBB; Map["SGN"] = 0xBC; Map["ABS"] = 0xBD; Map["PEEK"] = 0xBE;
-            Map["IN"] = 0xBF; Map["USR"] = 0xC0; Map["STR$"] = 0xC1; Map["CHR$"] = 0xC2;
-            Map["NOT"] = 0xC3; Map["BIN"] = 0xC4; Map["OR"] = 0xC5; Map["AND"] = 0xC6;
-            Map["<="] = 0xC7; Map[">="] = 0xC8; Map["<>"] = 0xC9; Map["LINE"] = 0xCA;
-            Map["THEN"] = 0xCB; Map["TO"] = 0xCC; Map["STEP"] = 0xCD; Map["DEF FN"] = 0xCE;
-            Map["CAT"] = 0xCF; Map["FORMAT"] = 0xD0; Map["MOVE"] = 0xD1; Map["ERASE"] = 0xD2;
-            Map["OPEN #"] = 0xD3; Map["CLOSE #"] = 0xD4; Map["MERGE"] = 0xD5; Map["VERIFY"] = 0xD6;
-            Map["BEEP"] = 0xD7; Map["CIRCLE"] = 0xD8; Map["INK"] = 0xD9; Map["PAPER"] = 0xDA;
-            Map["FLASH"] = 0xDB; Map["BRIGHT"] = 0xDC; Map["INVERSE"] = 0xDD; Map["OVER"] = 0xDE;
-            Map["OUT"] = 0xDF; Map["LPRINT"] = 0xE0; Map["LLIST"] = 0xE1; Map["STOP"] = 0xE2;
-            Map["READ"] = 0xE3; Map["DATA"] = 0xE4; Map["RESTORE"] = 0xE5; Map["NEW"] = 0xE6;
-            Map["BORDER"] = 0xE7; Map["CONTINUE"] = 0xE8; Map["DIM"] = 0xE9; Map["REM"] = 0xEA;
-            Map["FOR"] = 0xEB; Map["GO TO"] = 0xEC; Map["GOTO"] = 0xEC; Map["GO SUB"] = 0xED;
-            Map["GOSUB"] = 0xED; Map["INPUT"] = 0xEE; Map["LOAD"] = 0xEF; Map["LIST"] = 0xF0;
-            Map["LET"] = 0xF1; Map["PAUSE"] = 0xF2; Map["NEXT"] = 0xF3; Map["POKE"] = 0xF4;
-            Map["PRINT"] = 0xF5; Map["PLOT"] = 0xF6; Map["RUN"] = 0xF7; Map["SAVE"] = 0xF8;
-            Map["RANDOMIZE"] = 0xF9; Map["IF"] = 0xFA; Map["CLS"] = 0xFB; Map["DRAW"] = 0xFC;
-            Map["CLEAR"] = 0xFD; Map["RETURN"] = 0xFE; Map["COPY"] = 0xFF;
-        }
+            ["SPECTRUM"] = 0xA3,
+            ["PLAY"] = 0xA4,
+            ["RND"] = 0xA5,
+            ["INKEY$"] = 0xA6,
+            ["PI"] = 0xA7,
+            ["FN"] = 0xA8,
+            ["POINT"] = 0xA9,
+            ["SCREEN$"] = 0xAA,
+            ["ATTR"] = 0xAB,
+            ["AT"] = 0xAC,
+            ["TAB"] = 0xAD,
+            ["VAL$"] = 0xAE,
+            ["CODE"] = 0xAF,
+            ["VAL"] = 0xB0,
+            ["LEN"] = 0xB1,
+            ["SIN"] = 0xB2,
+            ["COS"] = 0xB3,
+            ["TAN"] = 0xB4,
+            ["ASN"] = 0xB5,
+            ["ACS"] = 0xB6,
+            ["ATN"] = 0xB7,
+            ["LN"] = 0xB8,
+            ["EXP"] = 0xB9,
+            ["INT"] = 0xBA,
+            ["SQR"] = 0xBB,
+            ["SGN"] = 0xBC,
+            ["ABS"] = 0xBD,
+            ["PEEK"] = 0xBE,
+            ["IN"] = 0xBF,
+            ["USR"] = 0xC0,
+            ["STR$"] = 0xC1,
+            ["CHR$"] = 0xC2,
+            ["NOT"] = 0xC3,
+            ["BIN"] = 0xC4,
+            ["OR"] = 0xC5,
+            ["AND"] = 0xC6,
+            ["<="] = 0xC7,
+            [">="] = 0xC8,
+            ["<>"] = 0xC9,
+            ["LINE"] = 0xCA,
+            ["THEN"] = 0xCB,
+            ["TO"] = 0xCC,
+            ["STEP"] = 0xCD,
+            ["DEF FN"] = 0xCE,
+            ["CAT"] = 0xCF,
+            ["FORMAT"] = 0xD0,
+            ["MOVE"] = 0xD1,
+            ["ERASE"] = 0xD2,
+            ["OPEN #"] = 0xD3,
+            ["CLOSE #"] = 0xD4,
+            ["MERGE"] = 0xD5,
+            ["VERIFY"] = 0xD6,
+            ["BEEP"] = 0xD7,
+            ["CIRCLE"] = 0xD8,
+            ["INK"] = 0xD9,
+            ["PAPER"] = 0xDA,
+            ["FLASH"] = 0xDB,
+            ["BRIGHT"] = 0xDC,
+            ["INVERSE"] = 0xDD,
+            ["OVER"] = 0xDE,
+            ["OUT"] = 0xDF,
+            ["LPRINT"] = 0xE0,
+            ["LLIST"] = 0xE1,
+            ["STOP"] = 0xE2,
+            ["READ"] = 0xE3,
+            ["DATA"] = 0xE4,
+            ["RESTORE"] = 0xE5,
+            ["NEW"] = 0xE6,
+            ["BORDER"] = 0xE7,
+            ["CONTINUE"] = 0xE8,
+            ["DIM"] = 0xE9,
+            ["REM"] = 0xEA,
+            ["FOR"] = 0xEB,
+            ["GO TO"] = 0xEC,
+            ["GOTO"] = 0xEC,
+            ["GO SUB"] = 0xED,
+            ["GOSUB"] = 0xED,
+            ["INPUT"] = 0xEE,
+            ["LOAD"] = 0xEF,
+            ["LIST"] = 0xF0,
+            ["LET"] = 0xF1,
+            ["PAUSE"] = 0xF2,
+            ["NEXT"] = 0xF3,
+            ["POKE"] = 0xF4,
+            ["PRINT"] = 0xF5,
+            ["PLOT"] = 0xF6,
+            ["RUN"] = 0xF7,
+            ["SAVE"] = 0xF8,
+            ["RANDOMIZE"] = 0xF9,
+            ["IF"] = 0xFA,
+            ["CLS"] = 0xFB,
+            ["DRAW"] = 0xFC,
+            ["CLEAR"] = 0xFD,
+            ["RETURN"] = 0xFE,
+            ["COPY"] = 0xFF
+        };
+
+        // ZX Spectrum Next Extensions
+        // Standard Sinclair BASIC
     }
 
     public class BasConverter
@@ -150,7 +236,7 @@ namespace Txt2Bas
                     string lowerLine = line.ToLowerInvariant();
                     if (lowerLine.StartsWith("#autostart"))
                     {
-                        string[] parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        string[] parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
                         if (parts.Length > 1 && int.TryParse(parts[1], out int val))
                         {
                             AutoStartLine = val;
@@ -292,9 +378,11 @@ namespace Txt2Bas
 
             lineData.Add(0x0D);
 
-            List<byte> result = new List<byte>();
-            result.Add((byte)((lineNum >> 8) & 0xFF));
-            result.Add((byte)(lineNum & 0xFF));
+            List<byte> result =
+            [
+                (byte)((lineNum >> 8) & 0xFF),
+                (byte)(lineNum & 0xFF)
+            ];
 
             int len = lineData.Count;
             result.Add((byte)(len & 0xFF));
