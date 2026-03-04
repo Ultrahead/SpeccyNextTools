@@ -1,235 +1,22 @@
-﻿// File  Program.cs
+// File  Program_bas2txt.cs
 // Brief Implementation file for the process that converts a +3DOS file into plain text.
 
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Text;
 
 namespace Bas2Txt
 {
-    /// <summary>
-    /// Main entry point for the application.
-    /// Converts a binary BASIC file (.bas) to a UTF-8 Text file.
-    /// </summary>
-    internal static class Program
-    {
-        /// <summary>
-        /// The main entry point for the application.
-        /// Reads the binary BASIC file +3DOS format, parses the structure and tokens, and writes the decoded text to the output file.
-        /// </summary>
-        /// <param name="args">
-        /// A string array containing command-line arguments:
-        /// <list type="bullet">
-        /// <item><description><b>args[0]</b>: The path to the input .bas file.</description></item>
-        /// <item><description><b>args[1]</b>: The path to the output text file.</description></item>
-        /// </list>
-        /// </param>
-        private static void Main(string[] args)
-        {
-            // 1. Validate the command line arguments count.
-            // 2. Verify that the input file exists.
-            // 3. Read the binary file content into a byte array.
-            // 4. Instantiate the parser to decode binary data into text.
-            // 5. Write the resulting string to the output file with UTF-8 encoding.
-            // 6. Output success message.
-            
-            if (args.Length < 2)
-            {
-                Console.WriteLine("Usage: bas2txt <input.bas> <output.txt>");
-                return;
-            }
-
-            string inputFile = args[0];
-            string outputFile = args[1];
-
-            if (!File.Exists(inputFile))
-            {
-                Console.WriteLine($"Error: Input file '{inputFile}' not found.");
-                return;
-            }
-
-            try
-            {
-                byte[] fileBytes = File.ReadAllBytes(inputFile);
-                
-                BasParser parser = new BasParser();
-                string decodedText = parser.Parse(fileBytes);
-
-                File.WriteAllText(outputFile, decodedText, Encoding.UTF8);
-
-                Console.WriteLine($"Success! Decoded {inputFile} to {outputFile}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Parses binary Spectrum BASIC data into a human-readable string.
-    /// Handles +3DOS headers, Token decoding, and hidden numeric formats.
-    /// </summary>
-    public class BasParser
-    {
-        private readonly Dictionary<byte, string> _reverseTokenMap = new ReverseTokenMap().Map;
-
-        /// <summary>
-        /// Parses a byte array containing a complete BASIC file.
-        /// </summary>
-        /// <param name="data">The raw file bytes.</param>
-        /// <returns>A string representing the decoded BASIC code.</returns>
-        public string Parse(byte[] data)
-        {
-            // 1. Check for the presence of a +3DOS header (128 bytes, starts with PLUS3DOS).
-            // 2. If header exists:
-            //    a. Read the Auto-start line (bytes 18-19).
-            //    b. If Auto-start is active, append "#autostart" directive.
-            //    c. Advance the offset to 128 (skip header).
-            // 3. Loop through the file data while offset < length:
-            //    a. Read Line Number (Big Endian).
-            //    b. Read Line Length (Little Endian).
-            //    c. Decode the line data payload.
-            //    d. Format as "LineNum Code".
-            // 4. Return the full text.
-            
-            StringBuilder sb = new StringBuilder();
-            int offset = 0;
-
-            // 1. Detect and Process +3DOS Header (128 bytes)
-            if (data.Length >= 128)
-            {
-                string signature = Encoding.ASCII.GetString(data, 0, 8);
-                
-                // Standard header usually starts with PLUS3DOS or ZXPLUS3
-                if (signature == "PLUS3DOS" || signature.StartsWith("ZXPLUS3"))
-                {
-                    // Check for Auto-start line (Bytes 18-19, Little Endian)
-                    int autoStart = data[18] | (data[19] << 8);
-
-                    // 32768 (0x8000) means "No Auto-start". Anything else is a line number.
-                    if (autoStart != 32768)
-                    {
-                        sb.AppendLine($"#autostart {autoStart}");
-                    }
-
-                    // Move past header to start of BASIC data
-                    offset = 128;
-                }
-            }
-
-            // 2. Parse Lines
-            // Line Format: [LineNum (2B Big Endian)] [Length (2B Little Endian)] [Data...] [0x0D]
-            while (offset < data.Length)
-            {
-                // Need at least 4 bytes for line header
-                if (offset + 4 > data.Length) break;
-
-                // Line Number (Big Endian)
-                int lineNum = (data[offset] << 8) | data[offset + 1];
-                offset += 2;
-
-                // Line Length (Little Endian)
-                int lineLen = data[offset] | (data[offset + 1] << 8);
-                offset += 2;
-
-                // Safety check for corrupt files
-                if (offset + lineLen - 1 > data.Length) break;
-
-                // Process Line Data (Exclude the final 0x0D which is included in lineLen)
-                string lineContent = DecodeLineData(data, offset, lineLen - 1);
-                
-                sb.AppendLine($"{lineNum} {lineContent}");
-
-                offset += lineLen;
-            }
-
-            return sb.ToString();
-        }
-
-        /// <summary>
-        /// Decodes the raw data payload of a single BASIC line.
-        /// </summary>
-        private string DecodeLineData(byte[] data, int start, int length)
-        {
-            // 1. Iterate through the byte range for this line.
-            // 2. Check for Hidden Number Markers (0x0E):
-            //    a. Skip the next 5 bytes (binary format) as we already have the ASCII representation.
-            // 3. Check for Tokens (Keywords):
-            //    a. Map byte to keyword string.
-            //    b. Apply Smart Spacing: If next byte is alphanumeric or quote, insert a space.
-            // 4. Check for Printable ASCII (32-126): Append char.
-            // 5. Check for Copyright symbol (0x7F).
-            
-            var sb = new StringBuilder();
-            int end = start + length;
-
-            for (int i = start; i < end; i++)
-            {
-                byte b = data[i];
-
-                // Case 1: Hidden Number Marker (0x0E)
-                // Spectrum BASIC stores numbers as ASCII followed by 0x0E and 5 binary bytes.
-                // We skip the binary bytes as we only need the ASCII representation for text output.
-                if (b == 0x0E)
-                {
-                    i += 5; 
-                    continue;
-                }
-
-                // Case 2: Token (Keywords)
-                if (_reverseTokenMap.TryGetValue(b, out var value))
-                {
-                    sb.Append(value);
-
-                    // SMART SPACING LOGIC:
-                    // If the NEXT byte is a printable character (letter, digit, quote),
-                    // insert a space to restore readability (e.g., CD"path" -> CD "path").
-                    if (i + 1 < end)
-                    {
-                        byte next = data[i + 1];
-                        // If next is not a token (byte < 128) and not a hidden number marker
-                        if (next < 128 && next != 0x0E)
-                        {
-                            char c = (char)next;
-                            if (char.IsLetterOrDigit(c) || c == '"' || c == '.')
-                            {
-                                sb.Append(' ');
-                            }
-                        }
-                    }
-                }
-                else switch (b)
-                {
-                    // Case 3: Printable ASCII
-                    case >= 32 and <= 126:
-                        sb.Append((char)b);
-                        break;
-                    // Case 4: Copyright Symbol
-                    case 0x7F:
-                        sb.Append('©');
-                        break;
-                }
-            }
-
-            return sb.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Dictionary mapping Byte Tokens to String Keywords.
-    /// </summary>
     public class ReverseTokenMap
     {
-        // 1. Populate dictionary with NextBASIC extensions.
-        // 2. Populate dictionary with Standard 48K BASIC tokens.
-        
-        /// <summary>
-        /// A dictionary containing the mapping from Byte token to Keyword string.
-        /// </summary>
-        public readonly Dictionary<byte, string> Map = new Dictionary<byte, string>();
+        public Dictionary<byte, string> Map { get; private set; }
 
         public ReverseTokenMap()
         {
-            // === ZX SPECTRUM NEXT EXTENSIONS (0x80 - 0xA2) ===
+            Map = new Dictionary<byte, string>();
+
+            // ZX Spectrum Next Extensions
             Map[0x87] = "PEEK$"; Map[0x88] = "REG"; Map[0x89] = "DPOKE"; Map[0x8A] = "DPEEK";
             Map[0x8B] = "MOD"; Map[0x8C] = "<<"; Map[0x8D] = ">>"; Map[0x8E] = "UNTIL";
             Map[0x8F] = "ERROR"; Map[0x90] = "ON"; Map[0x91] = "DEFPROC"; Map[0x92] = "ENDPROC";
@@ -238,7 +25,7 @@ namespace Bas2Txt
             Map[0x9B] = "TILE"; Map[0x9C] = "LAYER"; Map[0x9D] = "PALETTE"; Map[0x9E] = "SPRITE";
             Map[0x9F] = "PWD"; Map[0xA0] = "CD"; Map[0xA1] = "MKDIR"; Map[0xA2] = "RMDIR";
 
-            // === STANDARD ZX SPECTRUM 48K TOKENS (0xA3 - 0xFF) ===
+            // Standard Sinclair BASIC
             Map[0xA3] = "SPECTRUM"; Map[0xA4] = "PLAY"; Map[0xA5] = "RND"; Map[0xA6] = "INKEY$";
             Map[0xA7] = "PI"; Map[0xA8] = "FN"; Map[0xA9] = "POINT"; Map[0xAA] = "SCREEN$";
             Map[0xAB] = "ATTR"; Map[0xAC] = "AT"; Map[0xAD] = "TAB"; Map[0xAE] = "VAL$";
@@ -263,6 +50,146 @@ namespace Bas2Txt
             Map[0xF7] = "RUN"; Map[0xF8] = "SAVE"; Map[0xF9] = "RANDOMIZE"; Map[0xFA] = "IF";
             Map[0xFB] = "CLS"; Map[0xFC] = "DRAW"; Map[0xFD] = "CLEAR"; Map[0xFE] = "RETURN";
             Map[0xFF] = "COPY";
+        }
+    }
+
+    public class BasParser
+    {
+        private readonly ReverseTokenMap _reverseTokenMap;
+
+        public BasParser()
+        {
+            _reverseTokenMap = new ReverseTokenMap();
+        }
+
+        public string Parse(byte[] data)
+        {
+            StringBuilder sb = new StringBuilder();
+            int offset = 0;
+
+            if (data.Length >= 128)
+            {
+                string sig = Encoding.ASCII.GetString(data, 0, 8);
+                if (sig == "PLUS3DOS" || sig.StartsWith("ZXPLUS3"))
+                {
+                    int autoStart = data[18] | (data[19] << 8);
+                    if (autoStart != 32768)
+                    {
+                        sb.AppendLine($"#autostart {autoStart}");
+                    }
+                    offset = 128;
+                }
+            }
+
+            while (offset < data.Length)
+            {
+                if (offset + 4 > data.Length) break;
+
+                int lineNum = (data[offset] << 8) | data[offset + 1];
+                int lineLen = data[offset + 2] | (data[offset + 3] << 8);
+                offset += 4;
+
+                if (offset + lineLen - 1 > data.Length) break;
+
+                sb.AppendLine($"{lineNum} {DecodeLineData(data, offset, lineLen - 1)}");
+                offset += lineLen;
+            }
+
+            return sb.ToString();
+        }
+
+        private string DecodeLineData(byte[] data, int start, int length)
+        {
+            StringBuilder sb = new StringBuilder();
+            int end = start + length;
+
+            for (int i = start; i < end; i++)
+            {
+                byte b = data[i];
+
+                if (b == 0x0E)
+                {
+                    i += 5;
+                    continue;
+                }
+
+                if (_reverseTokenMap.Map.TryGetValue(b, out string tokenStr))
+                {
+                    sb.Append(tokenStr);
+                    if (i + 1 < end)
+                    {
+                        byte next = data[i + 1];
+                        if (next < 128 && next != 0x0E)
+                        {
+                            char c = (char)next;
+                            if (char.IsLetterOrDigit(c) || c == '"' || c == '.')
+                            {
+                                sb.Append(' ');
+                            }
+                        }
+                    }
+                }
+                else if (b >= 32 && b <= 126)
+                {
+                    sb.Append((char)b);
+                }
+                else if (b == 0x7F)
+                {
+                    sb.Append("\u00A9"); // Copyright symbol
+                }
+            }
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Main entry point for the application.
+    /// Converts a binary BASIC file (.bas) to a UTF-8 Text file.
+    /// </summary>
+    internal static class Program
+    {
+        private const string ToolVersion = "1.0";
+
+        static void PrintHelp()
+        {
+            Console.WriteLine($"ZX Spectrum BASIC-to-Text Converter v{ToolVersion}");
+            Console.WriteLine("Usage: bas2txt [options] <input.bas> <output.txt>\n");
+            Console.WriteLine("Options:");
+            Console.WriteLine("  -h, --help     Show help");
+            Console.WriteLine("  -v, --version  Show version");
+        }
+
+        static int Main(string[] args)
+        {
+            if (args.Length >= 1)
+            {
+                string arg = args[0];
+                if (arg == "-h" || arg == "--help") { PrintHelp(); return 0; }
+                if (arg == "-v" || arg == "--version") { Console.WriteLine($"bas2txt version {ToolVersion}"); return 0; }
+            }
+
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: bas2txt <input.bas> <output.txt>");
+                Console.WriteLine("See 'bas2txt --help' for details.");
+                return 0;
+            }
+
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(args[0]);
+                BasParser parser = new BasParser();
+                string output = parser.Parse(bytes);
+
+                File.WriteAllText(args[1], output, new UTF8Encoding(false)); // Write without BOM
+                Console.WriteLine($"Successfully decoded {args[0]} (v{ToolVersion})");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
         }
     }
 }
