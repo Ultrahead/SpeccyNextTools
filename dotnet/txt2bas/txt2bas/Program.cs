@@ -1,254 +1,226 @@
-// File   Program_txt2bas.cs
+// File   Program.cs
 // Brief  Implementation file for the process that converts plain text into a +3DOS file.
 
-using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Txt2Bas
 {
-    internal static class Plus3Dos
+    /// <summary>
+    /// Main entry point for the application.
+    /// Handles command line arguments and orchestrates the conversion process.
+    /// </summary>
+    internal static class Program
     {
+        /// <summary>
+        /// The main entry point for the application.
+        /// Reads the input text file, converts it to +3DOS tokenized BASIC, generates the header, and writes the output file.
+        /// </summary>
+        /// <param name="args">
+        /// A string array containing command-line arguments:
+        /// <list type="bullet">
+        /// <item><description><b>args[0]</b>: The path to the input text file.</description></item>
+        /// <item><description><b>args[1]</b>: The path to the output .bas file.</description></item>
+        /// </list>
+        /// </param>
+        static void Main(string[] args)
+        {
+            // 1. Validate the command line arguments count.
+            // 2. Check if the input file exists on disk.
+            // 3. Instantiate the converter and process the text file into binary BASIC data.
+            // 4. Create the +3DOS file header using the calculated data size and explicit auto-start line.
+            // 5. Write the Header followed immediately by the BASIC data to the output file.
+            // 6. Output success metrics to the console.
+
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: txt2bas <input.txt> <output.bas>");
+                return;
+            }
+
+            string inputFile = args[0];
+            string outputFile = args[1];
+
+            if (!File.Exists(inputFile))
+            {
+                Console.WriteLine($"Error: Input file '{inputFile}' not found.");
+                return;
+            }
+
+            try
+            {
+                BasConverter converter = new BasConverter();
+                byte[] basData = converter.ConvertFile(inputFile);
+
+                // Use the explicitly parsed AutoStartLine (defaults to 32768 if no #autostart found)
+                byte[] header = Plus3Dos.CreateHeader(basData.Length, converter.AutoStartLine);
+
+                using (var fs = new FileStream(outputFile, FileMode.Create))
+                {
+                    fs.Write(header, 0, header.Length);
+                    fs.Write(basData, 0, basData.Length);
+                }
+
+                Console.WriteLine($"Success! Created {outputFile}");
+
+                Console.WriteLine(converter.AutoStartLine < 32768
+                    ? $" - Auto-start Line: {converter.AutoStartLine}"
+                    : " - Auto-start Line: None");
+
+                Console.WriteLine($" - BASIC Size: {basData.Length} bytes");
+                Console.WriteLine($" - Total File Size: {header.Length + basData.Length} bytes");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generates the 128-byte +3DOS Header required for Spectrum Next/Plus3 files.
+    /// </summary>
+    public static class Plus3Dos
+    {
+        /// <summary>
+        /// Creates a valid +3DOS header.
+        /// </summary>
+        /// <param name="basicLength">The length of the BASIC program data (excluding header).</param>
+        /// <param name="autoStartLine">The line number to auto-run (or 32768 for none).</param>
+        /// <returns>A 128-byte byte array containing the header.</returns>
         public static byte[] CreateHeader(int basicLength, int autoStartLine)
         {
+            // 1. Allocate a zero-filled 128-byte buffer.
+            // 2. Write the "PLUS3DOS" signature and Soft EOF (0x1A) to the start.
+            // 3. Set the Issue (1) and Version (0) bytes.
+            // 4. Calculate and write Total File Size (Header + BASIC Data) at offset 11.
+            // 5. Write BASIC-specific metadata (Type, Length, Vars Offset).
+            // 6. Set the Auto-start line (or 32768 if disabled).
+            // 7. Calculate the Checksum (Sum of bytes 0-126 modulo 256) and write it at byte 127.
+
             byte[] header = new byte[128];
+            Array.Clear(header, 0, 128);
+
+            // Signature
             byte[] sig = Encoding.ASCII.GetBytes("PLUS3DOS");
             Array.Copy(sig, header, sig.Length);
-            
-            header[8] = 0x1A; // Soft EOF
-            header[9] = 0x01; // Issue number
-            header[10] = 0x00; // Version number
+            header[8] = 0x1A;
 
-            int totalFileSize = basicLength + 128;
-            header[11] = (byte)(totalFileSize & 0xFF);
-            header[12] = (byte)((totalFileSize >> 8) & 0xFF);
-            header[13] = (byte)((totalFileSize >> 16) & 0xFF);
-            header[14] = (byte)((totalFileSize >> 24) & 0xFF);
+            // Version info
+            header[9] = 0x01;
+            header[10] = 0x00;
 
+            // Total File Size (Header + Data)
+            int totalFileSize = basicLength + 128; 
+            BitConverter.GetBytes(totalFileSize).CopyTo(header, 11);
+
+            // BASIC Header Info
             header[15] = 0x00; // Type: Program
-            
-            header[16] = (byte)(basicLength & 0xFF);
-            header[17] = (byte)((basicLength >> 8) & 0xFF);
+            BitConverter.GetBytes((ushort)basicLength).CopyTo(header, 16); // Length
 
+            // Auto-start
             if (autoStartLine is >= 0 and < 32768)
             {
-                header[18] = (byte)(autoStartLine & 0xFF);
-                header[19] = (byte)((autoStartLine >> 8) & 0xFF);
+                BitConverter.GetBytes((ushort)autoStartLine).CopyTo(header, 18);
             }
             else
             {
-                header[18] = 0x00;
-                header[19] = 0x80; // 32768
+                BitConverter.GetBytes((ushort)32768).CopyTo(header, 18);
             }
 
-            header[20] = (byte)(basicLength & 0xFF);
-            header[21] = (byte)((basicLength >> 8) & 0xFF);
+            // Vars Offset
+            BitConverter.GetBytes((ushort)basicLength).CopyTo(header, 20);
 
+            // Checksum
             int sum = 0;
-            for (int i = 0; i < 127; i++)
-            {
-                sum += header[i];
-            }
+            for (int i = 0; i < 127; i++) sum += header[i];
             header[127] = (byte)(sum % 256);
 
             return header;
         }
     }
 
-    internal abstract class SinclairNumber
-    {
-        public static byte[] Pack(double number)
-        {
-            if (number % 1 == 0 && number is >= -65535.0 and <= 65535.0)
-            {
-                int val = (int)number;
-                byte sign = val < 0 ? (byte)0xFF : (byte)0x00;
-                if (val < 0) val = -val;
-
-                return [0x00, sign, (byte)(val & 0xFF), (byte)((val >> 8) & 0xFF), 0x00];
-            }
-            return "\0\0\0\0\0"u8.ToArray();
-        }
-    }
-
-    internal class TokenMap
-    {
-        public Dictionary<string, byte> Map { get; private set; } = new(StringComparer.OrdinalIgnoreCase)
-        {
-            // ZX Spectrum Next Extensions
-            ["PEEK$"] = 0x87,
-            ["REG"] = 0x88,
-            ["DPOKE"] = 0x89,
-            ["DPEEK"] = 0x8A,
-            ["MOD"] = 0x8B,
-            ["<<"] = 0x8C,
-            [">>"] = 0x8D,
-            ["UNTIL"] = 0x8E,
-            ["ERROR"] = 0x8F,
-            ["ON"] = 0x90,
-            ["DEFPROC"] = 0x91,
-            ["ENDPROC"] = 0x92,
-            ["PROC"] = 0x93,
-            ["LOCAL"] = 0x94,
-            ["DRIVER"] = 0x95,
-            ["WHILE"] = 0x96,
-            ["REPEAT"] = 0x97,
-            ["ELSE"] = 0x98,
-            ["REMOUNT"] = 0x99,
-            ["BANK"] = 0x9A,
-            ["TILE"] = 0x9B,
-            ["LAYER"] = 0x9C,
-            ["PALETTE"] = 0x9D,
-            ["SPRITE"] = 0x9E,
-            ["PWD"] = 0x9F,
-            ["CD"] = 0xA0,
-            ["MKDIR"] = 0xA1,
-            ["RMDIR"] = 0xA2,
-            // Standard Sinclair BASIC
-            ["SPECTRUM"] = 0xA3,
-            ["PLAY"] = 0xA4,
-            ["RND"] = 0xA5,
-            ["INKEY$"] = 0xA6,
-            ["PI"] = 0xA7,
-            ["FN"] = 0xA8,
-            ["POINT"] = 0xA9,
-            ["SCREEN$"] = 0xAA,
-            ["ATTR"] = 0xAB,
-            ["AT"] = 0xAC,
-            ["TAB"] = 0xAD,
-            ["VAL$"] = 0xAE,
-            ["CODE"] = 0xAF,
-            ["VAL"] = 0xB0,
-            ["LEN"] = 0xB1,
-            ["SIN"] = 0xB2,
-            ["COS"] = 0xB3,
-            ["TAN"] = 0xB4,
-            ["ASN"] = 0xB5,
-            ["ACS"] = 0xB6,
-            ["ATN"] = 0xB7,
-            ["LN"] = 0xB8,
-            ["EXP"] = 0xB9,
-            ["INT"] = 0xBA,
-            ["SQR"] = 0xBB,
-            ["SGN"] = 0xBC,
-            ["ABS"] = 0xBD,
-            ["PEEK"] = 0xBE,
-            ["IN"] = 0xBF,
-            ["USR"] = 0xC0,
-            ["STR$"] = 0xC1,
-            ["CHR$"] = 0xC2,
-            ["NOT"] = 0xC3,
-            ["BIN"] = 0xC4,
-            ["OR"] = 0xC5,
-            ["AND"] = 0xC6,
-            ["<="] = 0xC7,
-            [">="] = 0xC8,
-            ["<>"] = 0xC9,
-            ["LINE"] = 0xCA,
-            ["THEN"] = 0xCB,
-            ["TO"] = 0xCC,
-            ["STEP"] = 0xCD,
-            ["DEF FN"] = 0xCE,
-            ["CAT"] = 0xCF,
-            ["FORMAT"] = 0xD0,
-            ["MOVE"] = 0xD1,
-            ["ERASE"] = 0xD2,
-            ["OPEN #"] = 0xD3,
-            ["CLOSE #"] = 0xD4,
-            ["MERGE"] = 0xD5,
-            ["VERIFY"] = 0xD6,
-            ["BEEP"] = 0xD7,
-            ["CIRCLE"] = 0xD8,
-            ["INK"] = 0xD9,
-            ["PAPER"] = 0xDA,
-            ["FLASH"] = 0xDB,
-            ["BRIGHT"] = 0xDC,
-            ["INVERSE"] = 0xDD,
-            ["OVER"] = 0xDE,
-            ["OUT"] = 0xDF,
-            ["LPRINT"] = 0xE0,
-            ["LLIST"] = 0xE1,
-            ["STOP"] = 0xE2,
-            ["READ"] = 0xE3,
-            ["DATA"] = 0xE4,
-            ["RESTORE"] = 0xE5,
-            ["NEW"] = 0xE6,
-            ["BORDER"] = 0xE7,
-            ["CONTINUE"] = 0xE8,
-            ["DIM"] = 0xE9,
-            ["REM"] = 0xEA,
-            ["FOR"] = 0xEB,
-            ["GO TO"] = 0xEC,
-            ["GOTO"] = 0xEC,
-            ["GO SUB"] = 0xED,
-            ["GOSUB"] = 0xED,
-            ["INPUT"] = 0xEE,
-            ["LOAD"] = 0xEF,
-            ["LIST"] = 0xF0,
-            ["LET"] = 0xF1,
-            ["PAUSE"] = 0xF2,
-            ["NEXT"] = 0xF3,
-            ["POKE"] = 0xF4,
-            ["PRINT"] = 0xF5,
-            ["PLOT"] = 0xF6,
-            ["RUN"] = 0xF7,
-            ["SAVE"] = 0xF8,
-            ["RANDOMIZE"] = 0xF9,
-            ["IF"] = 0xFA,
-            ["CLS"] = 0xFB,
-            ["DRAW"] = 0xFC,
-            ["CLEAR"] = 0xFD,
-            ["RETURN"] = 0xFE,
-            ["COPY"] = 0xFF
-        };
-
-        // ZX Spectrum Next Extensions
-        // Standard Sinclair BASIC
-    }
-
+    /// <summary>
+    /// Converts plain text into tokenized Spectrum BASIC binary format.
+    /// </summary>
     public class BasConverter
     {
         private readonly TokenMap _tokenMap;
         private readonly List<string> _sortedKeys;
-        public int AutoStartLine { get; private set; } = 32768;
+        
+        /// <summary>
+        /// The Auto-start line number. 
+        /// Defaults to 32768 (No Auto-start). 
+        /// Set only via the #autostart directive in the source file.
+        /// </summary>
+        public int AutoStartLine { get; private set; } = 32768; 
 
+        /// <summary>
+        /// Initializes member variable fields of the <see cref="BasConverter"/> class.
+        /// </summary>
         public BasConverter()
         {
+            // 1. Initialize the TokenMap dictionary.
+            // 2. Create a list of keys sorted by Length Descending.
+            //    (This ensures greedy matching: e.g., "DEFPROC" is matched before "DEF").
+            
             _tokenMap = new TokenMap();
-            _sortedKeys = _tokenMap.Map.Keys.ToList();
-            _sortedKeys.Sort((a, b) => b.Length.CompareTo(a.Length));
+            _sortedKeys = _tokenMap.Map.Keys
+                .OrderByDescending(k => k.Length)
+                .ToList();
         }
 
+        /// <summary>
+        /// Reads a text file and converts it to a byte array of tokenized BASIC.
+        /// </summary>
+        /// <param name="path">Path to the input text file.</param>
+        /// <returns>Byte array representing the BASIC program.</returns>
         public byte[] ConvertFile(string path)
         {
-            List<byte> output = new List<byte>();
+            // 1. Read all lines from the source text file.
+            // 2. Initialize state variables (auto-line counter, output buffer).
+            // 3. Iterate through each line:
+            //    a. Skip whitespace-only lines (source code formatting).
+            //    b. Process directive (#autostart) then skip the line.
+            //    c. Skip all other lines starting with # (source code comments).
+            //    d. Parse explicit or implicit line numbers and tokenize content.
+            // 4. Return the aggregated binary data.
+
             string[] lines = File.ReadAllLines(path);
+            var output = new List<byte>();
+
             int currentLineNum = 10;
-            Regex lineRegex = new Regex(@"^(\d+)\s+(.*)");
 
-            foreach (string rawLine in lines)
+            foreach (string line in lines)
             {
-                string line = rawLine.Trim();
-                if (string.IsNullOrEmpty(line)) continue;
+                string text = line.Trim();
+                
+                // 1. Skip Empty Lines completely (do not generate a BASIC line)
+                if (string.IsNullOrWhiteSpace(text)) continue;
 
-                if (line.StartsWith("#"))
+                // 2. Handle Lines starting with #
+                if (text.StartsWith("#"))
                 {
-                    string lowerLine = line.ToLowerInvariant();
-                    if (lowerLine.StartsWith("#autostart"))
+                    // Check for directives
+                    if (text.StartsWith("#autostart", StringComparison.OrdinalIgnoreCase))
                     {
-                        string[] parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
-                        if (parts.Length > 1 && int.TryParse(parts[1], out int val))
+                        var parts = text.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length > 1 && int.TryParse(parts[1], out int autoStartVal))
                         {
-                            AutoStartLine = val;
+                            AutoStartLine = autoStartVal;
                         }
                     }
+                    
+                    // Whether it was a directive or a comment, skip it in the output.
                     continue;
                 }
 
+                // 3. Handle Standard Lines
                 int lineNum = currentLineNum;
-                string restOfLine = line;
-                Match match = lineRegex.Match(line);
+                string restOfLine = text;
 
+                Match match = Regex.Match(text, @"^(\d+)\s+(.*)");
+            
                 if (match.Success)
                 {
                     lineNum = int.Parse(match.Groups[1].Value);
@@ -260,192 +232,261 @@ namespace Txt2Bas
                     currentLineNum += 10;
                 }
 
-                output.AddRange(ParseLine(lineNum, restOfLine));
+                byte[] lineBytes = ParseLine(lineNum, restOfLine);
+                output.AddRange(lineBytes);
             }
 
             return output.ToArray();
         }
 
+        /// <summary>
+        /// Parses a single line of text into binary line format.
+        /// Structure: [LineNum(BE)] [Length(LE)] [Data...] [0x0D]
+        /// </summary>
+        /// <param name="lineNum">The line number.</param>
+        /// <param name="text">The text content of the line.</param>
+        /// <returns>A byte array representing the binary line.</returns>
         private byte[] ParseLine(int lineNum, string text)
         {
-            List<byte> lineData = new List<byte>();
-            bool expectCommand = true;
+            // 1. Iterate through the text character by character.
+            // 2. Detect and process String Literals (preserve exactly).
+            // 3. Detect and process SPECIAL COMMENT (';' after colon or at start).
+            // 4. Detect and process Numbers (convert to ASCII + 5-byte hidden Sinclair format).
+            // 5. Detect and process Keywords (Greedy Match against TokenMap):
+            //    a. If REM found, consume the rest of the line as a comment.
+            //    b. If other keyword found, strip immediately following whitespace.
+            // 6. Fallback: Add character as literal ASCII.
+            // 7. Append End-of-Line marker (0x0D).
+            // 8. Prepend the Line Header (Line Number + Length) and return the byte array.
 
+            List<byte> lineData = new List<byte>();
+            
             for (int i = 0; i < text.Length; i++)
             {
-                if (text[i] == ' ')
-                {
-                    lineData.Add((byte)' ');
-                    continue;
-                }
-
-                if (expectCommand && text[i] == '.')
-                {
-                    if (i + 1 < text.Length && char.IsDigit(text[i + 1]))
-                    {
-                        // Number starting with '.', let it fall through
-                    }
-                    else
-                    {
-                        string dotCmd = text.Substring(i);
-                        lineData.AddRange(Encoding.ASCII.GetBytes(dotCmd));
-                        break;
-                    }
-                }
-
+                // String Literals
                 if (text[i] == '"')
                 {
-                    expectCommand = false;
-                    int end = text.IndexOf('"', i + 1);
-                    if (end == -1)
-                    {
-                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i)));
-                        i = text.Length;
-                    }
-                    else
-                    {
-                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i, end - i + 1)));
-                        i = end;
-                    }
+                    int endQuote = text.IndexOf('"', i + 1);
+                    if (endQuote == -1) endQuote = text.Length; 
+                    
+                    string literal = text.Substring(i, endQuote - i + 1);
+                    lineData.AddRange(Encoding.ASCII.GetBytes(literal));
+                    i = endQuote; 
                     continue;
                 }
 
-                if (char.IsDigit(text[i]) || (text[i] == '.' && i + 1 < text.Length && char.IsDigit(text[i + 1])))
+                // COMMENT HANDLING: Strict check for ';comment' idiom
+                // Trigger: Semicolon at start of line OR Semicolon immediately preceded by Colon
+                // Handled BEFORE numbers/keywords to prevent misinterpreting tokens inside comments.
+                if (text[i] == ';')
                 {
-                    expectCommand = false;
-                    string numStr = "";
-                    int j = i;
-                    while (j < text.Length && (char.IsDigit(text[j]) || text[j] == '.'))
-                    {
-                        numStr += text[j++];
-                    }
+                    bool isComment = false;
+                    
+                    // Look backwards skipping whitespace to find the context
+                    int back = i - 1;
+                    while (back >= 0 && text[back] == ' ') back--;
+                    
+                    if (back < 0) isComment = true; // Start of line
+                    else if (text[back] == ':') isComment = true; // Preceded by colon
 
-                    if (double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double val))
+                    if (isComment)
                     {
-                        lineData.AddRange(Encoding.ASCII.GetBytes(numStr));
-                        lineData.Add(0x0E);
-                        lineData.AddRange(SinclairNumber.Pack(val));
-                        i = j - 1;
+                        // Consume the rest of the line as literal text (do not tokenize)
+                        string comment = text.Substring(i);
+                        lineData.AddRange(Encoding.ASCII.GetBytes(comment));
+                        i = text.Length; 
                         continue;
                     }
                 }
 
+                // NUMBERS (FIXED: Identifier-Aware Parsing)
+                bool isNumberStart = false;
+                if (char.IsDigit(text[i]) || (text[i] == '.' && i + 1 < text.Length && char.IsDigit(text[i + 1])))
+                {
+                    isNumberStart = true;
+                    
+                    // Look backwards to ensure this digit isn't part of an alphanumeric identifier (e.g., main2, var_1)
+                    int back = i - 1;
+                    while (back >= 0 && char.IsDigit(text[back])) back--;
+                    if (back >= 0 && (char.IsLetter(text[back]) || text[back] == '_'))
+                    {
+                        isNumberStart = false;
+                    }
+                }
+
+                if (isNumberStart)
+                {
+                    string numStr = "";
+                    int j = i;
+                    while (j < text.Length && (char.IsDigit(text[j]) || text[j] == '.'))
+                    {
+                        numStr += text[j];
+                        j++;
+                    }
+
+                    if (double.TryParse(numStr, out double val))
+                    {
+                        lineData.AddRange(Encoding.ASCII.GetBytes(numStr));
+                        lineData.Add(0x0E); // Hidden Marker
+                        lineData.AddRange(SinclairNumber.Pack(val));
+                        i = j - 1; 
+                        continue;
+                    }
+                }
+
+                // Keywords
                 bool matched = false;
                 foreach (string k in _sortedKeys)
                 {
                     if (i + k.Length > text.Length) continue;
-                    if (!text.Substring(i, k.Length).Equals(k, StringComparison.OrdinalIgnoreCase)) continue;
 
-                    bool isAlpha = char.IsLetter(k[0]);
-                    bool pOk = (i == 0) || !char.IsLetter(text[i - 1]);
-                    bool nOk = (i + k.Length >= text.Length) || !char.IsLetterOrDigit(text[i + k.Length]);
+                    if (string.Compare(text.Substring(i, k.Length), k, StringComparison.OrdinalIgnoreCase) != 0) 
+                        continue;
+                    
+                    bool isAlphaToken = char.IsLetter(k[0]);
+                    bool prevCharValid = (i == 0) || !char.IsLetter(text[i - 1]);
+                    bool nextCharValid = (i + k.Length >= text.Length) || !char.IsLetterOrDigit(text[i + k.Length]);
 
-                    if (isAlpha && (!pOk || !nOk)) continue;
-
+                    if (isAlphaToken && (!prevCharValid || !nextCharValid)) continue;
+                    
                     byte token = _tokenMap.Map[k];
                     lineData.Add(token);
-                    i += k.Length;
+                    i += k.Length; 
                     matched = true;
 
-                    if (token == 0xEA) // REM
+                    // REM handling
+                    if (token == 0xEA)
                     {
-                        expectCommand = false;
                         if (i < text.Length)
                         {
-                            lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i)));
-                            i = text.Length;
+                            string comment = text.Substring(i);
+                            lineData.AddRange(Encoding.ASCII.GetBytes(comment));
+                            i = text.Length; 
                         }
                     }
                     else
                     {
-                        if (token == 0xCB || token == 0x98) // THEN or ELSE
-                            expectCommand = true;
-                        else
-                            expectCommand = false;
-
+                        // Strip trailing space
                         while (i < text.Length && text[i] == ' ') i++;
                     }
-                    i--;
+
+                    i--; 
                     break;
                 }
 
-                if (!matched)
-                {
-                    lineData.Add((byte)text[i]);
-                    expectCommand = (text[i] == ':');
-                }
+                if (matched) continue;
+
+                // Literal
+                lineData.Add((byte)text[i]);
             }
 
             lineData.Add(0x0D);
 
-            List<byte> result =
+            // Construct Line Header
+            List<byte> finalLine =
             [
                 (byte)((lineNum >> 8) & 0xFF),
                 (byte)(lineNum & 0xFF)
             ];
 
-            int len = lineData.Count;
-            result.Add((byte)(len & 0xFF));
-            result.Add((byte)((len >> 8) & 0xFF));
+            int length = lineData.Count;
+            finalLine.Add((byte)(length & 0xFF));
+            finalLine.Add((byte)((length >> 8) & 0xFF));
 
-            result.AddRange(lineData);
-            return result.ToArray();
+            finalLine.AddRange(lineData);
+
+            return finalLine.ToArray();
         }
     }
 
     /// <summary>
-    /// Main entry point for the application.
-    /// Handles command line arguments and orchestrates the conversion process.
+    /// Handles the 5-byte floating point format used by Sinclair BASIC.
     /// </summary>
-    internal static class Program
+    public static class SinclairNumber
     {
-        private const string ToolVersion = "1.0";
-
-        static void PrintHelp()
+        /// <summary>
+        /// Packs a double into the 5-byte internal format.
+        /// Currently, supports integer format optimization (00 Sign LSB MSB 00).
+        /// </summary>
+        /// <param name="number">The number to pack.</param>
+        /// <returns>A 5-byte array representing the Sinclair number format.</returns>
+        public static byte[] Pack(double number)
         {
-            Console.WriteLine($"ZX Spectrum Text-to-BASIC Converter v{ToolVersion}");
-            Console.WriteLine("Usage: txt2bas [options] <input.txt> <output.bas>\n");
-            Console.WriteLine("Options:");
-            Console.WriteLine("  -h, --help     Show help");
-            Console.WriteLine("  -v, --version  Show version");
-        }
-
-        static int Main(string[] args)
-        {
-            if (args.Length >= 1)
+            // 1. Check if the number is a small integer (within +/- 65535).
+            // 2. If yes, create the integer format: 0x00, SignByte, LSB, MSB, 0x00.
+            // 3. If no, return empty zero bytes (full FP implementation omitted for brevity).
+            
+            if (number % 1 == 0 && number is >= -65535 and <= 65535)
             {
-                string arg = args[0];
-                if (arg == "-h" || arg == "--help") { PrintHelp(); return 0; }
-                if (arg == "-v" || arg == "--version") { Console.WriteLine($"txt2bas version {ToolVersion}"); return 0; }
-            }
+                int val = (int)number;
+                byte sign = 0;
 
-            if (args.Length < 2)
-            {
-                Console.WriteLine("Usage: txt2bas <input.txt> <output.bas>");
-                Console.WriteLine("See 'txt2bas --help' for details.");
-                return 0;
-            }
-
-            try
-            {
-                BasConverter conv = new BasConverter();
-                byte[] bytes = conv.ConvertFile(args[0]);
-                byte[] head = Plus3Dos.CreateHeader(bytes.Length, conv.AutoStartLine);
-
-                using (FileStream fs = new FileStream(args[1], FileMode.Create, FileAccess.Write))
+                if (val < 0)
                 {
-                    fs.Write(head, 0, head.Length);
-                    fs.Write(bytes, 0, bytes.Length);
+                    sign = 0xFF; 
+                    val = -val;
                 }
+                
+                return [0x00, sign, (byte)(val & 0xFF), (byte)((val >> 8) & 0xFF), 0x00];
+            }
+            
+            return "\0\0\0\0\0"u8.ToArray();
+        }
+    }
 
-                Console.WriteLine($"Successfully created {args[1]} (v{ToolVersion})");
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                return 1;
-            }
+    /// <summary>
+    /// Dictionary mapping String Keywords to Byte Tokens.
+    /// Includes Standard Spectrum and NextBASIC extensions.
+    /// </summary>
+    public class TokenMap
+    {
+        /// <summary>
+        /// A dictionary containing the mapping from Keyword string to Byte token.
+        /// </summary>
+        public readonly Dictionary<string, byte> Map = new Dictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Initializes the TokenMap with standard and extended Spectrum keywords.
+        /// </summary>
+        public TokenMap()
+        {
+            // 1. Populate the dictionary with NextBASIC extension tokens (0x80 - 0xA2).
+            // 2. Populate the dictionary with Standard 48K BASIC tokens (0xA3 - 0xFF).
+
+            // === ZX SPECTRUM NEXT EXTENSIONS (0x80 - 0xA2) ===
+            Map["PEEK$"] = 0x87; Map["REG"] = 0x88; Map["DPOKE"] = 0x89; Map["DPEEK"] = 0x8A;
+            Map["MOD"] = 0x8B; Map["<<"] = 0x8C; Map[">>"] = 0x8D; Map["UNTIL"] = 0x8E;
+            Map["ERROR"] = 0x8F; Map["ON"] = 0x90; Map["DEFPROC"] = 0x91; Map["ENDPROC"] = 0x92;
+            Map["PROC"] = 0x93; Map["LOCAL"] = 0x94; Map["DRIVER"] = 0x95; Map["WHILE"] = 0x96;
+            Map["REPEAT"] = 0x97; Map["ELSE"] = 0x98; Map["REMOUNT"] = 0x99; Map["BANK"] = 0x9A;
+            Map["TILE"] = 0x9B; Map["LAYER"] = 0x9C; Map["PALETTE"] = 0x9D; Map["SPRITE"] = 0x9E;
+            Map["PWD"] = 0x9F; Map["CD"] = 0xA0; Map["MKDIR"] = 0xA1; Map["RMDIR"] = 0xA2;
+
+            // === STANDARD ZX SPECTRUM 48K TOKENS (0xA3 - 0xFF) ===
+            Map["SPECTRUM"] = 0xA3; Map["PLAY"] = 0xA4; Map["RND"] = 0xA5; Map["INKEY$"] = 0xA6;
+            Map["PI"] = 0xA7; Map["FN"] = 0xA8; Map["POINT"] = 0xA9; Map["SCREEN$"] = 0xAA;
+            Map["ATTR"] = 0xAB; Map["AT"] = 0xAC; Map["TAB"] = 0xAD; Map["VAL$"] = 0xAE;
+            Map["CODE"] = 0xAF; Map["VAL"] = 0xB0; Map["LEN"] = 0xB1; Map["SIN"] = 0xB2;
+            Map["COS"] = 0xB3; Map["TAN"] = 0xB4; Map["ASN"] = 0xB5; Map["ACS"] = 0xB6;
+            Map["ATN"] = 0xB7; Map["LN"] = 0xB8; Map["EXP"] = 0xB9; Map["INT"] = 0xBA;
+            Map["SQR"] = 0xBB; Map["SGN"] = 0xBC; Map["ABS"] = 0xBD; Map["PEEK"] = 0xBE;
+            Map["IN"] = 0xBF; Map["USR"] = 0xC0; Map["STR$"] = 0xC1; Map["CHR$"] = 0xC2;
+            Map["NOT"] = 0xC3; Map["BIN"] = 0xC4; Map["OR"] = 0xC5; Map["AND"] = 0xC6;
+            Map["<="] = 0xC7; Map[">="] = 0xC8; Map["<>"] = 0xC9; Map["LINE"] = 0xCA;
+            Map["THEN"] = 0xCB; Map["TO"] = 0xCC; Map["STEP"] = 0xCD; Map["DEF FN"] = 0xCE;
+            Map["CAT"] = 0xCF; Map["FORMAT"] = 0xD0; Map["MOVE"] = 0xD1; Map["ERASE"] = 0xD2;
+            Map["OPEN #"] = 0xD3; Map["CLOSE #"] = 0xD4; Map["MERGE"] = 0xD5; Map["VERIFY"] = 0xD6;
+            Map["BEEP"] = 0xD7; Map["CIRCLE"] = 0xD8; Map["INK"] = 0xD9; Map["PAPER"] = 0xDA;
+            Map["FLASH"] = 0xDB; Map["BRIGHT"] = 0xDC; Map["INVERSE"] = 0xDD; Map["OVER"] = 0xDE;
+            Map["OUT"] = 0xDF; Map["LPRINT"] = 0xE0; Map["LLIST"] = 0xE1; Map["STOP"] = 0xE2;
+            Map["READ"] = 0xE3; Map["DATA"] = 0xE4; Map["RESTORE"] = 0xE5; Map["NEW"] = 0xE6;
+            Map["BORDER"] = 0xE7; Map["CONTINUE"] = 0xE8; Map["DIM"] = 0xE9; Map["REM"] = 0xEA;
+            Map["FOR"] = 0xEB; Map["GO TO"] = 0xEC; Map["GOTO"] = 0xEC; Map["GO SUB"] = 0xED;
+            Map["GOSUB"] = 0xED; Map["INPUT"] = 0xEE; Map["LOAD"] = 0xEF; Map["LIST"] = 0xF0;
+            Map["LET"] = 0xF1; Map["PAUSE"] = 0xF2; Map["NEXT"] = 0xF3; Map["POKE"] = 0xF4;
+            Map["PRINT"] = 0xF5; Map["PLOT"] = 0xF6; Map["RUN"] = 0xF7; Map["SAVE"] = 0xF8;
+            Map["RANDOMIZE"] = 0xF9; Map["IF"] = 0xFA; Map["CLS"] = 0xFB; Map["DRAW"] = 0xFC;
+            Map["CLEAR"] = 0xFD; Map["RETURN"] = 0xFE; Map["COPY"] = 0xFF;
         }
     }
 }
