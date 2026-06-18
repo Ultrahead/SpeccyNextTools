@@ -1,6 +1,9 @@
-// File  Program_bas2txt.cs
-// Brief Implementation file for the process that converts a +3DOS file into plain text.
+// File   Program_bas2txt.cs
+// Brief  Implementation file for the process that converts a +3DOS file into plain text.
 
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Text;
 
 namespace Bas2Txt
@@ -14,6 +17,11 @@ namespace Bas2Txt
             Map = new Dictionary<byte, string>
             {
                 // ZX Spectrum Next Extensions
+                [0x81] = "TIME",
+                [0x82] = "PRIVATE",
+                [0x84] = "ENDIF",
+                [0x85] = "EXIT",
+                [0x86] = "REF",
                 [0x87] = "PEEK$",
                 [0x88] = "REG",
                 [0x89] = "DPOKE",
@@ -42,6 +50,12 @@ namespace Bas2Txt
                 [0xA0] = "CD",
                 [0xA1] = "MKDIR",
                 [0xA2] = "RMDIR",
+                
+                // Aliases missing in the original logic but present in op-table
+                [0x83] = "ELSE IF", 
+                [0xE8] = "CONT", 
+                [0xF9] = "RAND", 
+
                 // Standard Sinclair BASIC
                 [0xA3] = "SPECTRUM",
                 [0xA4] = "PLAY",
@@ -112,7 +126,6 @@ namespace Bas2Txt
                 [0xE5] = "RESTORE",
                 [0xE6] = "NEW",
                 [0xE7] = "BORDER",
-                [0xE8] = "CONTINUE",
                 [0xE9] = "DIM",
                 [0xEA] = "REM",
                 [0xEB] = "FOR",
@@ -129,7 +142,6 @@ namespace Bas2Txt
                 [0xF6] = "PLOT",
                 [0xF7] = "RUN",
                 [0xF8] = "SAVE",
-                [0xF9] = "RANDOMIZE",
                 [0xFA] = "IF",
                 [0xFB] = "CLS",
                 [0xFC] = "DRAW",
@@ -137,6 +149,13 @@ namespace Bas2Txt
                 [0xFE] = "RETURN",
                 [0xFF] = "COPY"
             };
+        }
+        
+        internal static string GetUnicodeChar(byte code)
+        {
+            if (code == 0x60) return "£";
+            if (code == 0x7F) return "©";
+            return ((char)code).ToString();
         }
     }
 
@@ -153,78 +172,186 @@ namespace Bas2Txt
         {
             StringBuilder sb = new StringBuilder();
             int offset = 0;
+            int limit = data.Length;
 
             if (data.Length >= 128)
             {
                 string sig = Encoding.ASCII.GetString(data, 0, 8);
                 if (sig == "PLUS3DOS" || sig.StartsWith("ZXPLUS3"))
                 {
+                    byte hType = data[15];
+                    int hFileLength = data[16] | (data[17] << 8);
                     int autoStart = data[18] | (data[19] << 8);
-                    if (autoStart != 32768)
+                    int hOffset = data[20] | (data[21] << 8);
+
+                    int payloadLength = (hType == 0) ? hOffset : hFileLength;
+                    limit = 128 + payloadLength;
+                    
+                    if (limit > data.Length) 
+                    {
+                        limit = data.Length;
+                    }
+
+                    if (autoStart != 0 && autoStart != 32768 && autoStart <= 9999)
                     {
                         sb.AppendLine($"#autostart {autoStart}");
                     }
                     offset = 128;
                 }
             }
-
-            while (offset < data.Length)
+            
+            bool banked = false;
+            if (offset + 1 < limit && data[offset] == 0x42 && data[offset + 1] == 0x43)
             {
-                if (offset + 4 > data.Length) break;
+                offset += 2;
+                banked = true;
+            }
+
+            while (offset < limit)
+            {
+                if (offset + 4 > limit) break;
 
                 int lineNum = (data[offset] << 8) | data[offset + 1];
                 int lineLen = data[offset + 2] | (data[offset + 3] << 8);
                 offset += 4;
 
-                if (offset + lineLen - 1 > data.Length) break;
+                if (lineLen == 0) break;
+                
+                if (lineNum > 9999)
+                {
+                    if (lineLen == 0x8080 && lineNum == 0x8080 && banked)
+                    {
+                        break;
+                    }
+                    throw new Exception($"{lineNum} is beyond 9999 range: {lineLen}");
+                }
 
-                sb.AppendLine($"{lineNum} {DecodeLineData(data, offset, lineLen - 1)}");
+                if (offset + lineLen > limit) break;
+
+                string decoded = DecodeLineData(data, offset, lineLen);
+                string fullLine = $"{lineNum} {decoded}";
+                
+                sb.AppendLine(fullLine.TrimEnd());
                 offset += lineLen;
             }
 
-            return sb.ToString();
+            string result = sb.ToString();
+            if (result.EndsWith(Environment.NewLine)) 
+            {
+                result = result.Substring(0, result.Length - Environment.NewLine.Length);
+            } 
+            else if (result.EndsWith("\n")) 
+            {
+                result = result.Substring(0, result.Length - 1);
+            }
+
+            return result;
         }
 
         private string DecodeLineData(byte[] data, int start, int length)
         {
             StringBuilder sb = new StringBuilder();
             int end = start + length;
+            
+            bool inString = false;
+            bool inComment = false;
+            int lastNonWhitespace = -1;
+            int lastToken = -1;
 
             for (int i = start; i < end; i++)
             {
-                byte b = data[i];
+                byte c = data[i];
 
-                if (b == 0x0E)
+                if (c == 0x0D)
                 {
-                    i += 5;
-                    continue;
+                    break;
                 }
 
-                if (_reverseTokenMap.Map.TryGetValue(b, out string? tokenStr))
+                byte peek = (i + 1 < end) ? data[i + 1] : (byte)0;
+                char chr = (char)c;
+
+                if (inString || inComment)
                 {
-                    sb.Append(tokenStr);
-                    if (i + 1 < end)
+                    if (c == 0x60 || c == 0x7F)
                     {
-                        byte next = data[i + 1];
-                        if (next < 128 && next != 0x0E)
-                        {
-                            char c = (char)next;
-                            if (char.IsLetterOrDigit(c) || c == '"' || c == '.')
-                            {
-                                sb.Append(' ');
-                            }
-                        }
+                        sb.Append(ReverseTokenMap.GetUnicodeChar(c));
+                    }
+                    else
+                    {
+                        sb.Append(chr);
                     }
                 }
-                else if (b is >= 32 and <= 126)
+                else
                 {
-                    sb.Append((char)b);
+                    if (chr == ';')
+                    {
+                        if (lastNonWhitespace == -1 || lastNonWhitespace == ':')
+                        {
+                            inComment = true;
+                        }
+                        if (_reverseTokenMap.Map.ContainsKey(peek))
+                        {
+                            sb.Append(chr).Append(' ');
+                        }
+                        else
+                        {
+                            sb.Append(chr);
+                        }
+                    }
+                    else if (chr == ':')
+                    {
+                        if (peek == ';')
+                        {
+                            sb.Append(chr).Append(' ');
+                        }
+                        else
+                        {
+                            sb.Append(chr);
+                        }
+                    }
+                    else if (_reverseTokenMap.Map.TryGetValue(c, out string? keyword))
+                    {
+                        if (keyword == "REM")
+                        {
+                            inComment = true;
+                        }
+                        
+                        if (lastToken != -1 && _reverseTokenMap.Map.TryGetValue((byte)lastToken, out string? lastKey) && lastKey == ":")
+                        {
+                            sb.Append(' ').Append(keyword).Append(' ');
+                        }
+                        else if (lastToken != -1 && !_reverseTokenMap.Map.ContainsKey((byte)lastToken) && lastToken != ' ')
+                        {
+                            sb.Append(' ').Append(keyword).Append(' ');
+                        }
+                        else
+                        {
+                            sb.Append(keyword).Append(' ');
+                        }
+                    }
+                    else if (c == 0x0E)
+                    {
+                        i += 5;
+                    }
+                    else
+                    {
+                        sb.Append(chr);
+                    }
                 }
-                else if (b == 0x7F)
+
+                if (c == 0x22)
                 {
-                    sb.Append("\u00A9"); // Copyright symbol
+                    inString = !inString;
                 }
+
+                if (chr != ' ')
+                {
+                    lastNonWhitespace = chr;
+                }
+
+                lastToken = c;
             }
+
             return sb.ToString();
         }
     }
