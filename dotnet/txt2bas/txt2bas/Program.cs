@@ -313,14 +313,14 @@ namespace Txt2Bas
                         int pos = i;
                         while (pos < text.Length)
                         {
-                            char c = text[pos];
-                            if (c == '"')
+                            char ch = text[pos];
+                            if (ch == '"')
                             {
                                 int endQuote = text.IndexOf('"', pos + 1);
                                 if (endQuote != -1) pos = endQuote + 1;
                                 else pos = text.Length;
                             }
-                            else if (c == ':' || c == '\n')
+                            else if (ch == ':' || ch == '\n')
                             {
                                 break;
                             }
@@ -857,4 +857,31 @@ namespace Txt2Bas
                 byte[] bytes = conv.ConvertFile(inputFile);
                 byte[] head = Plus3Dos.CreateHeader(bytes.Length, conv.AutoStartLine);
 
-                using (FileStream fs = new FileStream(outputFile,
+                using (FileStream fs = new FileStream(outputFile, FileMode.Create, FileAccess.Write))
+                {
+                    fs.Write(head, 0, head.Length);
+                    fs.Write(bytes, 0, bytes.Length);
+                }
+
+                Console.WriteLine($"Success! Created {outputFile}");
+                if (conv.AutoStartLine < 32768)
+                {
+                    Console.WriteLine($" - Auto-start Line: {conv.AutoStartLine}");
+                }
+                else
+                {
+                    Console.WriteLine(" - Auto-start Line: None");
+                }
+                Console.WriteLine($" - BASIC Size: {bytes.Length} bytes");
+                Console.WriteLine($" - Total File Size: {head.Length + bytes.Length} bytes");
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+    }
+}
