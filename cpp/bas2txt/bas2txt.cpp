@@ -3,6 +3,7 @@
 #include <iostream>
 #include <sstream>
 #include <cctype>
+#include <algorithm>
 
 // TOOL_VERSION is provided by CMake. Fallback set to 1.0.
 #ifndef TOOL_VERSION
@@ -13,6 +14,8 @@ namespace bas2txt {
 
     ReverseTokenMap::ReverseTokenMap() {
         // ZX Spectrum Next Extensions
+        Map[0x81] = "TIME"; Map[0x82] = "PRIVATE"; Map[0x84] = "ENDIF"; Map[0x85] = "EXIT";
+        Map[0x86] = "REF";
         Map[0x87] = "PEEK$"; Map[0x88] = "REG"; Map[0x89] = "DPOKE"; Map[0x8A] = "DPEEK";
         Map[0x8B] = "MOD"; Map[0x8C] = "<<"; Map[0x8D] = ">>"; Map[0x8E] = "UNTIL";
         Map[0x8F] = "ERROR"; Map[0x90] = "ON"; Map[0x91] = "DEFPROC"; Map[0x92] = "ENDPROC";
@@ -20,6 +23,9 @@ namespace bas2txt {
         Map[0x97] = "REPEAT"; Map[0x98] = "ELSE"; Map[0x99] = "REMOUNT"; Map[0x9A] = "BANK";
         Map[0x9B] = "TILE"; Map[0x9C] = "LAYER"; Map[0x9D] = "PALETTE"; Map[0x9E] = "SPRITE";
         Map[0x9F] = "PWD"; Map[0xA0] = "CD"; Map[0xA1] = "MKDIR"; Map[0xA2] = "RMDIR";
+
+        // Aliases missing in the original logic but present in op-table
+        Map[0x83] = "ELSE IF"; Map[0xE8] = "CONT"; Map[0xF9] = "RAND";
 
         // Standard Sinclair BASIC
         Map[0xA3] = "SPECTRUM"; Map[0xA4] = "PLAY"; Map[0xA5] = "RND"; Map[0xA6] = "INKEY$";
@@ -48,64 +54,168 @@ namespace bas2txt {
         Map[0xFF] = "COPY";
     }
 
+    // Static helper scoped only to this compilation unit to avoid header dependencies
+    static std::string GetUnicodeChar(uint8_t code) {
+        if (code == 0x60) return "£";
+        if (code == 0x7F) return "©";
+        return std::string(1, static_cast<char>(code));
+    }
+
     std::string BasParser::Parse(const std::vector<uint8_t>& data) {
         std::stringstream sb;
         size_t offset = 0;
+        size_t limit = data.size(); // Type match strictly to resolve C++ warning signed/unsigned
 
         // Handle +3DOS Header
         if (data.size() >= 128) {
             std::string sig(data.begin(), data.begin() + 8);
             if (sig == "PLUS3DOS" || sig.substr(0, 7) == "ZXPLUS3") {
+                uint8_t hType = data[15];
+                size_t hFileLength = data[16] | (data[17] << 8);
+
+                // Fix: JS bugs cancel out to write standard Little-Endian bytes, so we parse it as standard Little-Endian
                 int autoStart = data[18] | (data[19] << 8);
-                if (autoStart != 32768) sb << "#autostart " << autoStart << "\n";
+
+                size_t hOffset = data[20] | (data[21] << 8);
+
+                // Replicate logic `const length = header.hType === 0 ? header.hOffset : header.hFileLength;`
+                size_t payloadLength = (hType == 0) ? hOffset : hFileLength;
+                limit = 128 + payloadLength;
+
+                if (limit > data.size()) {
+                    limit = data.size();
+                }
+
+                if (autoStart != 0 && autoStart != 32768 && autoStart <= 9999) {
+                    sb << "#autostart " << autoStart << "\n";
+                }
                 offset = 128;
             }
         }
 
-        // Iterate through BASIC lines
-        while (offset < data.size()) {
-            if (offset + 4 > data.size()) break;
+        // Handle banked logic
+        bool banked = false;
+        if (offset + 1 < limit && data[offset] == 0x42 && data[offset + 1] == 0x43) {
+            offset += 2;
+            banked = true;
+        }
 
+        // Iterate through BASIC lines
+        while (offset < limit) {
+            if (offset + 4 > limit) break;
+
+            // In bas2txt: unpack '<n$line S$length' means BigEndian Line, LittleEndian Length
             int lineNum = (data[offset] << 8) | data[offset + 1];
-            int lineLen = data[offset + 2] | (data[offset + 3] << 8);
+            size_t lineLen = data[offset + 2] | (data[offset + 3] << 8); // Size_t for bounds comparisons
             offset += 4;
 
-            if (offset + lineLen - 1 > data.size()) break;
+            if (lineLen == 0) break;
 
-            sb << lineNum << " " << DecodeLineData(data, (int)offset, lineLen - 1) << "\n";
+            if (lineNum > 9999) {
+                if (lineLen == 0x8080 && lineNum == 0x8080 && banked) {
+                    break;
+                }
+                throw std::runtime_error(std::to_string(lineNum) + " is beyond 9999 range: " + std::to_string(lineLen));
+            }
+
+            if (offset + lineLen > limit) break;
+
+            // Pass exactly the line content into decoder
+            std::string decoded = DecodeLineData(data, static_cast<int>(offset), static_cast<int>(lineLen));
+            std::string fullLine = std::to_string(lineNum) + " " + decoded;
+
+            // Trim trailing spaces mimicking JS `lines.push(string.trim());`
+            auto last = std::find_if_not(fullLine.rbegin(), fullLine.rend(), [](unsigned char ch) { return std::isspace(ch); }).base();
+            fullLine.erase(last, fullLine.end());
+
+            sb << fullLine << "\n";
             offset += lineLen;
         }
 
-        return sb.str();
+        // Remove trailing \n to match JS `.join('\n')`
+        std::string result = sb.str();
+        if (!result.empty() && result.back() == '\n') {
+            result.pop_back();
+        }
+
+        return result;
     }
 
     std::string BasParser::DecodeLineData(const std::vector<uint8_t>& data, int start, int length) {
         std::stringstream sb;
         int end = start + length;
 
+        bool inString = false;
+        bool inComment = false;
+        int lastNonWhitespace = -1;
+        int lastToken = -1;
+
         for (int i = start; i < end; i++) {
-            uint8_t b = data[i];
+            uint8_t c = data[i];
 
-            // Ignore Sinclair hidden number format
-            if (b == 0x0E) { i += 5; continue; }
-
-            // Check for keyword tokens
-            if (_reverseTokenMap.Map.count(b)) {
-                sb << _reverseTokenMap.Map[b];
-                // Smart spacing logic
-                if (i + 1 < end) {
-                    uint8_t next = data[i + 1];
-                    if (next < 128 && next != 0x0E && (std::isalnum(next) || next == '"' || next == '.')) {
-                        sb << ' ';
-                    }
-                }
-            } else if (b >= 32 && b <= 126) {
-                sb << (char)b;
-            } else if (b == 0x7F) {
-                // Copyright symbol
-                sb << "\xC2\xA9";
+            if (c == 0x0D) {
+                break;
             }
+
+            uint8_t peek = (i + 1 < end) ? data[i + 1] : 0;
+            char chr = static_cast<char>(c);
+
+            if (inString || inComment) {
+                if (c == 0x60 || c == 0x7F) { // BASIC_CHRS maps
+                    sb << GetUnicodeChar(c);
+                } else {
+                    sb << chr;
+                }
+            } else {
+                if (chr == ';') {
+                    // check if we're starting a comment
+                    if (lastNonWhitespace == -1 || lastNonWhitespace == ':') {
+                        inComment = true;
+                    }
+                    if (_reverseTokenMap.Map.count(peek)) {
+                        sb << chr << ' ';
+                    } else {
+                        sb << chr;
+                    }
+                } else if (chr == ':') {
+                    if (peek == ';') {
+                        sb << chr << ' ';
+                    } else {
+                        sb << chr;
+                    }
+                } else if (_reverseTokenMap.Map.count(c)) {
+                    std::string keyword = _reverseTokenMap.Map[c];
+                    if (keyword == "REM") {
+                        inComment = true;
+                    }
+
+                    if (lastToken != -1 && _reverseTokenMap.Map.count(lastToken) && _reverseTokenMap.Map[lastToken] == ":") {
+                        sb << ' ' << keyword << ' ';
+                    } else if (lastToken != -1 && !_reverseTokenMap.Map.count(lastToken) && lastToken != ' ') {
+                        sb << ' ' << keyword << ' ';
+                    } else {
+                        sb << keyword << ' ';
+                    }
+                } else if (c == 0x0E) {
+                    // jump over numeric 5-byte payload.
+                    // Let the loop naturally close so `last` correctly registers this mathematical block format
+                    i += 5;
+                } else {
+                    sb << chr;
+                }
+            }
+
+            if (c == 0x22) { // '"'
+                inString = !inString;
+            }
+
+            if (chr != ' ') {
+                lastNonWhitespace = chr;
+            }
+
+            lastToken = c;
         }
+
         return sb.str();
     }
 } // namespace bas2txt
