@@ -34,7 +34,7 @@ namespace Txt2Bas
             header[16] = (byte)(basicLength & 0xFF);
             header[17] = (byte)((basicLength >> 8) & 0xFF);
 
-            if (autoStartLine is >= 0 and < 32768)
+            if (autoStartLine >= 0 && autoStartLine < 32768)
             {
                 header[18] = (byte)(autoStartLine & 0xFF);
                 header[19] = (byte)((autoStartLine >> 8) & 0xFF);
@@ -71,7 +71,38 @@ namespace Txt2Bas
 
                 return [0x00, sign, (byte)(val & 0xFF), (byte)((val >> 8) & 0xFF), 0x00];
             }
-            return "\0\0\0\0\0"u8.ToArray();
+            
+            bool isNegative = number < 0.0;
+            if (isNegative) number = -number;
+
+            if (number == 0.0) return "\0\0\0\0\0"u8.ToArray();
+
+            byte exponent = 0x80;
+            while (number < 0.5)
+            {
+                number *= 2.0;
+                exponent--;
+            }
+
+            while (number >= 1.0)
+            {
+                number *= 0.5;
+                exponent++;
+            }
+
+            number *= 4294967296.0; // 0x100000000
+            number += 0.5; // rounding step
+
+            uint mantissa = (uint)number;
+
+            byte m1 = (byte)((mantissa >> 24) & 0xFF);
+            byte m2 = (byte)((mantissa >> 16) & 0xFF);
+            byte m3 = (byte)((mantissa >> 8) & 0xFF);
+            byte m4 = (byte)(mantissa & 0xFF);
+
+            if (!isNegative) m1 &= 0x7F;
+
+            return [exponent, m1, m2, m3, m4];
         }
     }
 
@@ -80,6 +111,8 @@ namespace Txt2Bas
         public Dictionary<string, byte> Map { get; private set; } = new(StringComparer.OrdinalIgnoreCase)
         {
             // ZX Spectrum Next Extensions
+            ["TIME"] = 0x81, ["PRIVATE"] = 0x82, ["ENDIF"] = 0x84, ["EXIT"] = 0x85,
+            ["REF"] = 0x86, 
             ["PEEK$"] = 0x87, ["REG"] = 0x88, ["DPOKE"] = 0x89, ["DPEEK"] = 0x8A,
             ["MOD"] = 0x8B, ["<<"] = 0x8C, [">>"] = 0x8D, ["UNTIL"] = 0x8E,
             ["ERROR"] = 0x8F, ["ON"] = 0x90, ["DEFPROC"] = 0x91, ["ENDPROC"] = 0x92,
@@ -87,6 +120,9 @@ namespace Txt2Bas
             ["REPEAT"] = 0x97, ["ELSE"] = 0x98, ["REMOUNT"] = 0x99, ["BANK"] = 0x9A,
             ["TILE"] = 0x9B, ["LAYER"] = 0x9C, ["PALETTE"] = 0x9D, ["SPRITE"] = 0x9E,
             ["PWD"] = 0x9F, ["CD"] = 0xA0, ["MKDIR"] = 0xA1, ["RMDIR"] = 0xA2,
+
+            // Aliases missing in the original logic but present in op-table
+            ["ELSE IF"] = 0x83, ["CONT"] = 0xE8, ["RAND"] = 0xF9, 
 
             // Standard Sinclair BASIC
             ["SPECTRUM"] = 0xA3, ["PLAY"] = 0xA4, ["RND"] = 0xA5, ["INKEY$"] = 0xA6,
@@ -129,12 +165,22 @@ namespace Txt2Bas
             _sortedKeys.Sort((a, b) => b.Length.CompareTo(a.Length));
         }
 
+        private static bool IsHexDigit(char c)
+        {
+            return (c >= '0' && c <= '9') || 
+                   (c >= 'A' && c <= 'F') || 
+                   (c >= 'a' && c <= 'f');
+        }
+
         public byte[] ConvertFile(string path)
         {
             List<byte> output = new List<byte>();
-            string[] lines = File.ReadAllLines(path);
+            string text = File.ReadAllText(path);
+            
+            // Replicates the C++ logic to handle classic Mac \r files and standard Unix/Windows properly
+            string[] lines = text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             int currentLineNum = 10;
-            Regex lineRegex = new Regex(@"^(\d+)\s+(.*)");
+            Regex lineRegex = new Regex(@"^\s*(\d{1,4})\s?(.*)");
 
             foreach (string rawLine in lines)
             {
@@ -146,7 +192,7 @@ namespace Txt2Bas
                     string lowerLine = line.ToLowerInvariant();
                     if (lowerLine.StartsWith("#autostart"))
                     {
-                        string[] parts = line.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+                        string[] parts = line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
                         if (parts.Length > 1 && int.TryParse(parts[1], out int val))
                         {
                             AutoStartLine = val;
@@ -180,89 +226,164 @@ namespace Txt2Bas
         {
             List<byte> lineData = new List<byte>();
             bool expectCommand = true;
+            
+            List<string> inStack = new List<string>();
+            
+            void PopTo(string type)
+            {
+                while (inStack.Count > 0)
+                {
+                    string last = inStack[inStack.Count - 1];
+                    inStack.RemoveAt(inStack.Count - 1);
+                    if (last == type) break;
+                }
+            }
+
+            bool IsIn(string type)
+            {
+                return inStack.Contains(type);
+            }
+
+            bool inIntExpression = false;
+            bool inIf = false;
+            bool inUntil = false;
+            int intParensDepth = 0;
+            bool intSubStatement = false;
 
             for (int i = 0; i < text.Length; i++)
             {
-                if (text[i] == ' ' || text[i] == '\t')
+                if (text[i] == '=' || text[i] == ',' || text[i] == ';' || text[i] == ':')
                 {
-                    lineData.Add((byte)text[i]);
+                    if (intParensDepth == 0 && !inIf && !inUntil)
+                    {
+                        if (!intSubStatement) inIntExpression = false;
+                    }
+                }
+                
+                if (text[i] == ':')
+                {
+                    inIf = false;
+                    inUntil = false;
+                    intParensDepth = 0;
+                    inIntExpression = false;
+                    intSubStatement = false;
+                }
+
+                if (text[i] == '%')
+                {
+                    inIntExpression = true;
+                    bool startOfIntStatement = false;
+                    
+                    if (lineData.Count == 0)
+                    {
+                        startOfIntStatement = true;
+                    }
+                    else
+                    {
+                        for (int idx = lineData.Count - 1; idx >= 0; idx--)
+                        {
+                            byte b = lineData[idx];
+                            if (b == ' ' || b == '\t') continue;
+                            if (b == ':' || b == 0x8F || b == '=' ||
+                                b == 0xFA || b == 0x83 || b == 0x98 || b == 0x8E ||
+                                b == 0xCE)
+                            {
+                                startOfIntStatement = true;
+                            }
+                            break;
+                        }
+                    }
+                    
+                    if (startOfIntStatement) intSubStatement = true;
+                    
+                    lineData.Add((byte)'%');
+                    expectCommand = false;
+                    if (i + 1 < text.Length && text[i + 1] == ' ') i++;
                     continue;
                 }
 
-                // DOT COMMAND LOGIC
                 if (expectCommand && text[i] == '.')
                 {
                     if (i + 1 < text.Length && char.IsDigit(text[i + 1]))
                     {
-                        // Number starting with '.', let it fall through
+                        // Fall through
                     }
                     else
                     {
-                        string dotCmd = text.Substring(i);
+                        int pos = i;
+                        while (pos < text.Length)
+                        {
+                            char c = text[pos];
+                            if (c == '"')
+                            {
+                                int endQuote = text.IndexOf('"', pos + 1);
+                                if (endQuote != -1) pos = endQuote + 1;
+                                else pos = text.Length;
+                            }
+                            else if (c == ':' || c == '\n')
+                            {
+                                break;
+                            }
+                            else
+                            {
+                                pos++;
+                            }
+                        }
+                        string dotCmd = text.Substring(i, pos - i);
                         lineData.AddRange(Encoding.ASCII.GetBytes(dotCmd));
-                        break;
+                        i = pos - 1;
+                        expectCommand = false;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        continue;
                     }
                 }
 
-                // Strings
                 if (text[i] == '"')
                 {
                     expectCommand = false;
-                    int end = text.IndexOf('"', i + 1);
-                    if (end == -1)
+                    int endQuote = text.IndexOf('"', i + 1);
+                    if (endQuote == -1)
                     {
                         lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i)));
                         i = text.Length;
+                        PopTo("STRING_EXPRESSION");
+                        inStack.Add("STRING_EXPRESSION");
+                        break;
                     }
                     else
                     {
-                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i, end - i + 1)));
-                        i = end;
+                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i, endQuote - i + 1)));
+                        i = endQuote;
+                        PopTo("STRING_EXPRESSION");
+                        inStack.Add("STRING_EXPRESSION");
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
                     }
                     continue;
                 }
 
-                // Numeric logic
-                if (char.IsDigit(text[i]) || (text[i] == '.' && i + 1 < text.Length && char.IsDigit(text[i + 1])))
-                {
-                    expectCommand = false;
-                    string numStr = "";
-                    int j = i;
-                    while (j < text.Length && (char.IsDigit(text[j]) || text[j] == '.'))
-                    {
-                        numStr += text[j++];
-                    }
-
-                    if (double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double val))
-                    {
-                        lineData.AddRange(Encoding.ASCII.GetBytes(numStr));
-                        lineData.Add(0x0E); // Marker
-                        lineData.AddRange(SinclairNumber.Pack(val));
-                        i = j - 1;
-                        continue;
-                    }
-                }
-
-                // Comment Handling (;)
                 if (text[i] == ';')
                 {
-                    bool isComment = false;
-                    int back = i - 1;
-                    while (back >= 0 && text[back] == ' ') back--;
-
-                    if (back < 0) isComment = true;
-                    else if (text[back] == ':') isComment = true;
-
-                    if (isComment)
+                    bool isComment = true;
+                    for (int idx = lineData.Count - 1; idx >= 0; idx--)
                     {
-                        string comment = text.Substring(i);
-                        lineData.AddRange(Encoding.ASCII.GetBytes(comment));
-                        i = text.Length;
-                        continue;
+                        byte b = lineData[idx];
+                        if (b == ' ' || b == '\t') continue;
+                        if (b == ':' || b == 0x8F || b == 0xCB || b == 0x98)
+                        {
+                            isComment = true;
+                            break;
+                        }
+                        isComment = false;
+                        break;
+                    }
+
+                    if (isComment || lineData.Count == 0)
+                    {
+                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i)));
+                        break;
                     }
                 }
 
-                // Keyword processing
                 bool matched = false;
                 foreach (string k in _sortedKeys)
                 {
@@ -271,60 +392,404 @@ namespace Txt2Bas
                     string sub = text.Substring(i, k.Length);
                     if (!sub.Equals(k, StringComparison.OrdinalIgnoreCase)) continue;
 
-                    bool isAlpha = char.IsLetter(k[0]);
-                    bool pOk = (i == 0) || !char.IsLetter(text[i - 1]);
-                    bool nOk = (i + k.Length >= text.Length) || !char.IsLetterOrDigit(text[i + k.Length]);
+                    bool isAlphaStart = char.IsLetter(k[0]);
+                    bool isAlphaEnd = char.IsLetter(k[k.Length - 1]);
 
-                    if (isAlpha && (!pOk || !nOk)) continue;
+                    bool validBoundary = true;
+                    if (isAlphaStart)
+                    {
+                        int back = i - 1;
+                        if (back >= 0)
+                        {
+                            char p = text[back];
+                            if (char.IsLetterOrDigit(p) || p == '_') validBoundary = false;
+                        }
+                    }
+                    if (validBoundary && isAlphaEnd)
+                    {
+                        int next = i + k.Length;
+                        if (next < text.Length)
+                        {
+                            char n = text[next];
+                            if (char.IsLetterOrDigit(n) || n == '_') validBoundary = false;
+                        }
+                    }
+
+                    if (!validBoundary) continue;
 
                     byte token = _tokenMap.Map[k];
-                    lineData.Add(token);
-                    i += k.Length;
-                    matched = true;
+
+                    if (token == 0xCE)
+                    {
+                        inStack.Add("DEFFN");
+                        inStack.Add("DEFFN_SIG");
+                    }
+
+                    if (token == 0xFA)
+                    {
+                        bool hasThen = Regex.IsMatch(text.Substring(i), @"\bTHEN\b", RegexOptions.IgnoreCase);
+                        if (!hasThen) token = 0x83;
+                    }
+
+                    if (token == 0xFA || token == 0x83) inIf = true;
+
+                    if (token == 0xCB)
+                    {
+                        inIf = false;
+                        inIntExpression = false;
+                        intSubStatement = false;
+                    }
+                    if (token == 0x8E) inUntil = true;
+                    if (token == 0x84)
+                    {
+                        inIf = false;
+                        inIntExpression = false;
+                        intSubStatement = false;
+                    }
+
+                    bool isOperator = false;
+                    if (k == "AND" || k == "OR" || k == "NOT" || k == "MOD" || k == "-" || k == "+" ||
+                        k == "*" || k == "/" || k == "<" || k == ">" || k == "<=" || k == ">=" || k == "<>" ||
+                        k == "<<" || k == ">>" || k == "&" || k == "|" || k == "^" || k == "!")
+                    {
+                        isOperator = true;
+                    }
+                    bool isIntFunc = false;
+                    if (k == "IN" || k == "REG" || k == "PEEK" || k == "DPEEK" || k == "USR" ||
+                        k == "BIN" || k == "RND" || k == "BANK" || k == "SPRITE" || k == "INT" ||
+                        k == "ABS" || k == "SGN" || k == "CODE")
+                    {
+                        isIntFunc = true;
+                    }
+
+                    if (inIntExpression && intParensDepth > 0)
+                    {
+                    }
+                    else if (intSubStatement)
+                    {
+                    }
+                    else if (!isOperator && !isIntFunc)
+                    {
+                        inIntExpression = false;
+                        intSubStatement = false;
+                    }
 
                     if (token == 0xEA) // REM
                     {
-                        expectCommand = false;
-                        if (i < text.Length)
+                        lineData.Add(token);
+                        int r = i + k.Length;
+                        if (r < text.Length && text[r] == ' ') r++;
+                        if (r < text.Length)
                         {
-                            lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i)));
-                            i = text.Length;
+                            lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(r)));
                         }
+                        i = text.Length;
+                        matched = true;
+                        break;
+                    }
+                    else if (token == 0x82) // PRIVATE
+                    {
+                        lineData.Add(token);
+                        int j = i + k.Length;
+                        while (j < text.Length && (text[j] == ' ' || text[j] == '\t')) j++;
+                        bool hasClear = false;
+                        if (j + 5 <= text.Length && text.Substring(j, 5).Equals("CLEAR", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasClear = true;
+                        }
+                        if (!hasClear)
+                        {
+                            lineData.Add(0x0E);
+                            for (int z = 0; z < 5; z++) lineData.Add(0x00);
+                        }
+                        i += k.Length - 1;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        matched = true;
+                        break;
+                    }
+                    else if (token == 0xC4) // BIN
+                    {
+                        lineData.Add(token);
+                        int j = i + k.Length;
+                        while (j < text.Length && (text[j] == ' ' || text[j] == '\t')) j++;
+                        string binStr = "";
+                        while (j < text.Length && (text[j] == '0' || text[j] == '1'))
+                        {
+                            binStr += text[j++];
+                        }
+                        if (binStr.Length > 0)
+                        {
+                            lineData.AddRange(Encoding.ASCII.GetBytes(binStr));
+                            if (!inIntExpression)
+                            {
+                                lineData.Add(0x0E);
+                                try
+                                {
+                                    uint binVal = Convert.ToUInt32(binStr, 2);
+                                    lineData.AddRange(SinclairNumber.Pack(binVal));
+                                }
+                                catch
+                                {
+                                    lineData.AddRange(new byte[] { 0, 0, 0, 0, 0 });
+                                }
+                            }
+                            i = j - 1;
+                        }
+                        else
+                        {
+                            i += k.Length - 1;
+                        }
+                        expectCommand = false;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        matched = true;
+                        break;
                     }
                     else
                     {
-                        if (token == 0xCB || token == 0x98) // THEN or ELSE
-                            expectCommand = true;
-                        else
-                            expectCommand = false;
-
-                        while (i < text.Length && text[i] == ' ') i++;
+                        lineData.Add(token);
+                        if (token == 0xCB || token == 0x98) expectCommand = true;
+                        else expectCommand = false;
+                        i += k.Length - 1;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        matched = true;
+                        break;
                     }
-                    i--;
-                    break;
                 }
 
                 if (matched) continue;
 
-                // Default fallback
-                lineData.Add((byte)text[i]);
-                if (text[i] == ':')
+                if (char.IsLetter(text[i]))
+                {
+                    int j = i;
+                    while (j < text.Length && (char.IsLetterOrDigit(text[j]) || text[j] == '_' || text[j] == '$'))
+                    {
+                        j++;
+                    }
+                    string ident = text.Substring(i, j - i);
+                    lineData.AddRange(Encoding.ASCII.GetBytes(ident));
+
+                    if (IsIn("STRING_EXPRESSION"))
+                    {
+                        PopTo("STRING_EXPRESSION");
+                    }
+                    if (ident.Length > 0 && ident.EndsWith("$"))
+                    {
+                        inStack.Add("STRING_EXPRESSION");
+                    }
+                    if (IsIn("DEFFN_ARGS"))
+                    {
+                        if (ident.Length == 0 || !ident.EndsWith("$"))
+                        {
+                            lineData.Add(0x0E);
+                            for (int z = 0; z < 5; z++) lineData.Add(0x00);
+                        }
+                    }
+
+                    i = j - 1;
+                    expectCommand = false;
+                    if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                    continue;
+                }
+
+                if (text[i] == '$')
+                {
+                    int j = i + 1;
+                    string hexStr = "";
+                    while (j < text.Length && (IsHexDigit(text[j]) || text[j] == '.'))
+                    {
+                        hexStr += text[j++];
+                    }
+                    if (hexStr.Length > 0)
+                    {
+                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i, j - i)));
+                        if (!inIntExpression)
+                        {
+                            lineData.Add(0x0E);
+                            try
+                            {
+                                double val = 0;
+                                int dotPos = hexStr.IndexOf('.');
+                                if (dotPos != -1)
+                                {
+                                    string whole = hexStr.Substring(0, dotPos);
+                                    string frac = hexStr.Substring(dotPos + 1);
+                                    val = whole.Length > 0 ? Convert.ToUInt32(whole, 16) : 0;
+                                    if (frac.Length > 0)
+                                    {
+                                        val += Convert.ToUInt32(frac, 16) / Math.Pow(16.0, frac.Length);
+                                    }
+                                }
+                                else
+                                {
+                                    val = Convert.ToUInt32(hexStr, 16);
+                                }
+                                lineData.AddRange(SinclairNumber.Pack(val));
+                            }
+                            catch
+                            {
+                                lineData.AddRange(new byte[] { 0, 0, 0, 0, 0 });
+                            }
+                        }
+                        i = j - 1;
+                        expectCommand = false;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        continue;
+                    }
+                }
+
+                if (text[i] == '@')
+                {
+                    int j = i + 1;
+                    string binStr = "";
+                    while (j < text.Length && (text[j] == '0' || text[j] == '1' || text[j] == '.'))
+                    {
+                        binStr += text[j++];
+                    }
+                    if (binStr.Length > 0)
+                    {
+                        lineData.AddRange(Encoding.ASCII.GetBytes(text.Substring(i, j - i)));
+                        if (!inIntExpression)
+                        {
+                            lineData.Add(0x0E);
+                            try
+                            {
+                                double val = 0;
+                                int dotPos = binStr.IndexOf('.');
+                                if (dotPos != -1)
+                                {
+                                    string whole = binStr.Substring(0, dotPos);
+                                    string frac = binStr.Substring(dotPos + 1);
+                                    val = whole.Length > 0 ? Convert.ToUInt32(whole, 2) : 0;
+                                    if (frac.Length > 0)
+                                    {
+                                        val += Convert.ToUInt32(frac, 2) / Math.Pow(2.0, frac.Length);
+                                    }
+                                }
+                                else
+                                {
+                                    val = Convert.ToUInt32(binStr, 2);
+                                }
+                                lineData.AddRange(SinclairNumber.Pack(val));
+                            }
+                            catch
+                            {
+                                lineData.AddRange(new byte[] { 0, 0, 0, 0, 0 });
+                            }
+                        }
+                        i = j - 1;
+                        expectCommand = false;
+                        if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                        continue;
+                    }
+                }
+
+                if (char.IsDigit(text[i]) || (text[i] == '.' && i + 1 < text.Length && char.IsDigit(text[i + 1])))
+                {
+                    expectCommand = false;
+                    bool skipMarker = inIntExpression;
+                    string numStr = "";
+                    int j = i;
+                    while (j < text.Length && (char.IsDigit(text[j]) || text[j] == '.' || text[j] == 'E' || text[j] == 'e'))
+                    {
+                        if (text[j] == 'E' || text[j] == 'e')
+                        {
+                            numStr += text[j++];
+                            if (j < text.Length && (text[j] == '+' || text[j] == '-')) numStr += text[j++];
+                        }
+                        else
+                        {
+                            numStr += text[j++];
+                        }
+                    }
+
+                    if (!skipMarker)
+                    {
+                        double val = 0;
+                        double.TryParse(numStr, NumberStyles.Float, CultureInfo.InvariantCulture, out val);
+                        lineData.AddRange(Encoding.ASCII.GetBytes(numStr));
+                        lineData.Add(0x0E);
+                        lineData.AddRange(SinclairNumber.Pack(val));
+                    }
+                    else
+                    {
+                        lineData.AddRange(Encoding.ASCII.GetBytes(numStr));
+                    }
+                    
+                    i = j - 1;
+                    if (i + 1 < text.Length && text[i + 1] == ' ') i++;
+                    continue;
+                }
+
+                if (text[i] == ' ' || text[i] == '\t')
+                {
+                    lineData.Add((byte)text[i]);
+                    continue;
+                }
+
+                byte c = (byte)text[i];
+                lineData.Add(c);
+
+                if (c == '=')
+                {
+                    if (!inIf && !inUntil)
+                    {
+                        inIntExpression = false;
+                        intSubStatement = false;
+                    }
+                }
+                else if (c == ',' || c == ';')
+                {
+                    if (intParensDepth == 0 && !inIf && !inUntil)
+                    {
+                        inIntExpression = false;
+                        intSubStatement = false;
+                    }
+                }
+
+                if (c == ':')
                 {
                     expectCommand = true;
+                    inStack.Clear();
+                    inIf = false;
+                    inUntil = false;
+                    intParensDepth = 0;
+                    inIntExpression = false;
+                    intSubStatement = false;
                 }
                 else
                 {
                     expectCommand = false;
                 }
+
+                if (c == '(')
+                {
+                    if (inIntExpression) intParensDepth++;
+                    inStack.Add("OPEN_PARENS");
+                    if (IsIn("DEFFN_SIG")) inStack.Add("DEFFN_ARGS");
+                }
+                else if (c == ')')
+                {
+                    if (intParensDepth > 0) intParensDepth--;
+                    PopTo("OPEN_PARENS");
+                }
+                else if (c == '=')
+                {
+                    if (inStack.Count > 0 && inStack[inStack.Count - 1] == "DEFFN_SIG")
+                    {
+                        PopTo("DEFFN_SIG");
+                    }
+                }
+
+                if (i + 1 < text.Length && text[i + 1] == ' ') i++;
             }
 
-            lineData.Add(0x0D); // Spectrum EOL
+            lineData.Add(0x0D);
 
-            List<byte> result =
-            [
+            List<byte> result = new List<byte>
+            {
                 (byte)((lineNum >> 8) & 0xFF),
                 (byte)(lineNum & 0xFF)
-            ];
+            };
 
             int len = lineData.Count;
             result.Add((byte)(len & 0xFF));
@@ -345,8 +810,8 @@ namespace Txt2Bas
 
         static void PrintHelp()
         {
-            Console.WriteLine("  _______     _   ___  ___          ");
-            Console.WriteLine(" |__   __|   | | |__ \\|  _ \\         ");
+            Console.WriteLine("  _______     _   ___  ___         ");
+            Console.WriteLine(" |__   __|   | | |__ \\|  _ \\       ");
             Console.WriteLine("    | |___  _| |_   ) | |_) | __ _ ___");
             Console.WriteLine("    | / \\ \\/ / __| / /|  _ < / _` / __|");
             Console.WriteLine("    | |  >  <| |_ / /_| |_) | (_| \\__ \\");
@@ -370,7 +835,7 @@ namespace Txt2Bas
                 if (arg == "-v" || arg == "--version") { Console.WriteLine($"txt2bas version {ToolVersion}"); return 0; }
             }
 
-            if (args.Length < 3)
+            if (args.Length < 2)
             {
                 Console.WriteLine("Usage: txt2bas <input.txt> <output.bas>");
                 Console.WriteLine("Try 'txt2bas --help' for more information.");
@@ -392,31 +857,4 @@ namespace Txt2Bas
                 byte[] bytes = conv.ConvertFile(inputFile);
                 byte[] head = Plus3Dos.CreateHeader(bytes.Length, conv.AutoStartLine);
 
-                using (FileStream fs = new FileStream(outputFile, FileMode.Create, FileAccess.Write))
-                {
-                    fs.Write(head, 0, head.Length);
-                    fs.Write(bytes, 0, bytes.Length);
-                }
-
-                Console.WriteLine($"Success! Created {outputFile}");
-                if (conv.AutoStartLine < 32768)
-                {
-                    Console.WriteLine($" - Auto-start Line: {conv.AutoStartLine}");
-                }
-                else
-                {
-                    Console.WriteLine(" - Auto-start Line: None");
-                }
-                Console.WriteLine($" - BASIC Size: {bytes.Length} bytes");
-                Console.WriteLine($" - Total File Size: {head.Length + bytes.Length} bytes");
-
-                return 0;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error: {ex.Message}");
-                return 1;
-            }
-        }
-    }
-}
+                using (FileStream fs = new FileStream(outputFile,
