@@ -36,6 +36,7 @@ namespace txt2bas {
         header[17] = static_cast<uint8_t>((hFileLengthField >> 8) & 0xFF);
 
         if (autoStartLine >= 0 && autoStartLine < 32768) {
+            // JS unpack/pack DataView endianness bugs cancel each other out to output native Little-Endian
             header[18] = static_cast<uint8_t>(autoStartLine & 0xFF);
             header[19] = static_cast<uint8_t>((autoStartLine >> 8) & 0xFF);
         } else {
@@ -160,19 +161,42 @@ namespace txt2bas {
 
     std::vector<uint8_t> BasConverter::ConvertFile(const std::string& path) {
         std::vector<uint8_t> output;
-        std::ifstream file(path);
 
+        // Open safely as a binary array to avoid missing line breaks and carriage returns (\r)
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open()) throw std::runtime_error("Could not open file: " + path);
 
-        std::string line;
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        std::string text(size, '\0');
+        if (size > 0) {
+            if (!file.read(&text[0], size)) {
+                throw std::runtime_error("Failed to read file.");
+            }
+        }
+        file.close();
+
+        // Exact match of index.mjs text.split(text.includes('\r') ? '\r' : '\n')
+        // to securely segment Classic Mac \r files vs modern \n files without ignoring content.
+        std::vector<std::string> lines;
+        char delimiter = text.find('\r') != std::string::npos ? '\r' : '\n';
+        size_t start = 0;
+        size_t end = text.find(delimiter);
+        while (end != std::string::npos) {
+            lines.push_back(text.substr(start, end - start));
+            start = end + 1;
+            end = text.find(delimiter, start);
+        }
+        lines.push_back(text.substr(start));
+
         int currentLineNum = 10;
-        // Strict match to mimic `^\s*(\d{1,4})\s?(.*)$` logic from parser-version.mjs
         std::regex lineRegex(R"(^\s*(\d{1,4})\s?(.*))");
 
-        while (std::getline(file, line)) {
+        for (std::string line : lines) {
+            size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos) continue;
+            line.erase(0, first);
             line.erase(line.find_last_not_of(" \t\r\n") + 1);
-
-            if (line.empty()) continue;
 
             if (line[0] == '#') {
                 std::string lowerLine = line;
@@ -210,7 +234,6 @@ namespace txt2bas {
         // Exact state machine tracker for duplicating JS tokenization flow
         std::vector<std::string> in_stack;
 
-        // The original JS bug relies entirely on this function blindly wiping values OUT and destroying the array if a key is missed.
         auto popTo = [&](const std::string& type) {
             while (!in_stack.empty()) {
                 std::string last = in_stack.back();
@@ -228,11 +251,54 @@ namespace txt2bas {
         bool inUntil = false;
         int intParensDepth = 0;
 
+        // SubStatement Tracker: Explicitly models the JS flag `intSubStatement`
+        // that completely blocks `resetIntExpression()` calls until `:` forces a reset
+        bool intSubStatement = false;
+
         for (size_t i = 0; i < text.length(); i++) {
+
+            // Literal Resets for inIntExpression
+            if (text[i] == '=' || text[i] == ',' || text[i] == ';' || text[i] == ':') {
+                if (intParensDepth == 0 && !inIf && !inUntil) {
+                    if (!intSubStatement) inIntExpression = false;
+                }
+            }
+
+            // `:` forces a total reset, wiping EVERYTHING
+            if (text[i] == ':') {
+                inIf = false;
+                inUntil = false;
+                intParensDepth = 0;
+                inIntExpression = false;
+                intSubStatement = false;
+            }
 
             // NextBASIC integer expression prefix '%'
             if (text[i] == '%') {
                 inIntExpression = true;
+
+                // Track startOfStatement flag logic.
+                bool startOfIntStatement = false;
+
+                if (lineData.empty()) {
+                    startOfIntStatement = true;
+                } else {
+                    for (int idx = (int)lineData.size() - 1; idx >= 0; idx--) {
+                        uint8_t b = lineData[idx];
+                        if (b == ' ' || b == '\t') continue;
+                        if (b == ':' || b == 0x8F /* ERROR */ || b == '=' ||
+                            b == 0xFA /* IF */ || b == 0x83 /* ELSE IF */ || b == 0x98 /* ELSE */ || b == 0x8E /* UNTIL */ ||
+                            b == 0xCE /* DEF FN */) {
+                            startOfIntStatement = true;
+                        }
+                        break;
+                    }
+                }
+
+                if (startOfIntStatement) {
+                    intSubStatement = true;
+                }
+
                 lineData.push_back('%');
                 expectCommand = false;
                 if (i + 1 < text.length() && text[i+1] == ' ') i++; // JS slurps exactly ONE space after symbols
@@ -304,7 +370,7 @@ namespace txt2bas {
                     break;
                 }
 
-                if (isComment) {
+                if (isComment || lineData.empty()) {
                     std::string comment = text.substr(i);
                     lineData.insert(lineData.end(), comment.begin(), comment.end());
                     break;
@@ -353,18 +419,32 @@ namespace txt2bas {
                     in_stack.push_back("DEFFN_SIG");
                 }
 
-                if (token == 0xFA || token == 0x83) inIf = true; // IF or ELSE IF
+                if (token == 0xFA) { // IF
+                    bool hasThen = false;
+                    std::regex thenRegex(R"(\bTHEN\b)", std::regex_constants::icase);
+                    if (std::regex_search(text.begin() + i, text.end(), thenRegex)) {
+                        hasThen = true;
+                    }
+                    if (!hasThen) token = 0x83; // Block IF
+                }
+
+                // Explicitly mirrors opTable.ELSEIF missing key bug inside manageTokenState allowing block IFs to bypass the IF stack
+                if (token == 0xFA || token == 0x83) inIf = true;
+
                 if (token == 0xCB) {
                     inIf = false; // THEN
                     inIntExpression = false; // Evaluates int Expression Reset unconditionally
+                    intSubStatement = false;
                 }
                 if (token == 0x8E) inUntil = true; // UNTIL
                 if (token == 0x84) {
                     inIf = false; // ENDIF
                     inIntExpression = false;
+                    intSubStatement = false;
                 }
 
-                // Operator check for inIntExpression.
+                // Operator check for inIntExpression Reset Logic.
+                // JS: if (inIntExpression && operators.includes(token.text)) { nop } else { resetIntExpression(); }
                 bool isOperator = false;
                 if (k == "AND" || k == "OR" || k == "NOT" || k == "MOD" || k == "-" || k == "+" ||
                     k == "*" || k == "/" || k == "<" || k == ">" || k == "<=" || k == ">=" || k == "<>" ||
@@ -378,19 +458,14 @@ namespace txt2bas {
                     isIntFunc = true;
                 }
 
-                if (!isOperator && !isIntFunc) {
-                    if (intParensDepth == 0) {
-                        inIntExpression = false;
-                    }
-                }
-
-                if (token == 0xFA) { // IF
-                    bool hasThen = false;
-                    std::regex thenRegex(R"(\bTHEN\b)", std::regex_constants::icase);
-                    if (std::regex_search(text.begin() + i, text.end(), thenRegex)) {
-                        hasThen = true;
-                    }
-                    if (!hasThen) token = 0x83; // Block IF
+                // JS Logic precisely mapped:
+                if (inIntExpression && intParensDepth > 0) {
+                    // nop
+                } else if (intSubStatement) {
+                    // nop
+                } else if (!isOperator && !isIntFunc) {
+                    inIntExpression = false;
+                    intSubStatement = false;
                 }
 
                 if (token == 0xEA) { // REM
@@ -486,13 +561,16 @@ namespace txt2bas {
                     }
                 }
 
+                // JS processIdentifier does NOT manually hack the tracker out.
+                // It cleanly falls through allowing trailing symbols to determine scope closure natively.
+
                 i = j - 1;
                 expectCommand = false;
                 if (i + 1 < text.length() && text[i+1] == ' ') i++;
                 continue;
             }
 
-            // 7. HEX AND BINARY NEXTBASIC SYMBOLS (e.g. $, @)
+            // 7. HEX NEXTBASIC OPERATORS (e.g. $)
             if (text[i] == '$') {
                 size_t j = i + 1;
                 std::string hexStr;
@@ -591,7 +669,7 @@ namespace txt2bas {
                     double val = 0;
                     try { val = std::stod(numStr); } catch(...) {}
                     lineData.insert(lineData.end(), numStr.begin(), numStr.end());
-                    lineData.push_back(0x0E); // Explicitly required 6-byte payload start
+                    lineData.push_back(0x0E); // Explicitly required 6-byte payload start on normal floating ints
                     std::vector<uint8_t> packed = SinclairNumber::Pack(val);
                     lineData.insert(lineData.end(), packed.begin(), packed.end());
                 } else {
@@ -613,6 +691,19 @@ namespace txt2bas {
             uint8_t c = static_cast<uint8_t>(text[i]);
             lineData.push_back(c);
 
+            // Replicate JS Literal Expression Wiping Bug natively
+            if (c == '=') {
+                if (!inIf && !inUntil) {
+                    inIntExpression = false;
+                    intSubStatement = false;
+                }
+            } else if (c == ',' || c == ';') {
+                if (intParensDepth == 0 && !inIf && !inUntil) {
+                    inIntExpression = false;
+                    intSubStatement = false;
+                }
+            }
+
             if (c == ':') {
                 expectCommand = true;
                 in_stack.clear();
@@ -620,15 +711,9 @@ namespace txt2bas {
                 inUntil = false;
                 intParensDepth = 0;
                 inIntExpression = false;
+                intSubStatement = false;
             } else {
                 expectCommand = false;
-            }
-
-            // Explicitly mirrors JS opTable.ELSEIF missing key bug resulting in blocks tracking '=' as a valid expression reset token.
-            if (c == '=' || c == ',' || c == ';') {
-                if (intParensDepth == 0 && !inIf && !inUntil) {
-                    inIntExpression = false;
-                }
             }
 
             if (c == '(') {
